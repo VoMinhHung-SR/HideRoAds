@@ -1,34 +1,42 @@
 (() => {
   'use strict';
 
-  // Site check
   if (!/rophim\./i.test(location.hostname)) return;
 
   const log = msg => console.log(`✅ [RoPhim] ${msg}`);
   const warn = msg => console.warn(`⚠️ [RoPhim] ${msg}`);
 
   // ============================================================
-  // 🎯 CONFIG
+  // 🎯 ENHANCED CONFIG
   // ============================================================
   const CONFIG = {
-    blocked: /man88|lu88|crash2\.html|report_issue|\.ads\.|adserver|catfish|sspp/i,
+    blocked: /man88|lu88|crash2\.html|report_issue|\.ads\.|adserver|catfish|sspp|preroll|ad-overlay|ima-ad/i,
     allowed: /goatembed\.com|rophim\.mx|rophim\.com/i,
     adSelectors: [
-      '[class*="man88"]', '[class*="lu88"]', '[class*="sspp"]',
-      '[class*="catfish"]', '[href*="man88"]', '[href*="lu88"]',
-      '[href*="88."]', '[src*="man88"]', '[src*="lu88"]',
+      // Classic ads
+      '[class*="man88"]', '[class*="lu88"]', '[class*="sspp"]', '[class*="catfish"]',
+      '[href*="man88"]', '[href*="lu88"]', '[href*="88."]',
+      '[src*="man88"]', '[src*="lu88"]',
+      
+      // Overlay ads
       '.denied-box', '.ad-overlay', '.ima-ad-container',
       '[class*="preroll"]', '[class*="ads"]',
-      // Goatembed specific selectors
-      '.jw-skip', '.jw-skippable', '.skip-buttons',
-      '.jwplayer.jw-flag-ads', '.jw-ads', '.jw-ad-display',
-      '.sspp-area', '.sspp-area.is-player'
-    ],
-    // Pre-roll detection patterns
-    prerollPatterns: [
-      '.jw-skip', '.jw-skippable', '.skip-buttons .sb-button',
-      '.jwplayer.jw-flag-ads', '.jw-ads', '.jw-ad-display',
-      '[class*="preroll"]', '[class*="ad-"]', '.ad-overlay'
+      
+      // SSPP ads from CSS
+      '.sspp-area', '[class*="sspp"]',
+      
+      // JW Player ads
+      '.jw-ad', '.jw-ad-container', '.jw-ad-group',
+      '.jw-ad-control', '.jw-ad-controls',
+      
+      // Generic overlay patterns
+      'div[style*="position: fixed"][style*="z-index: 999"]',
+      'div[style*="position: fixed"][style*="z-index: 9999"]',
+      'div[style*="position: absolute"][style*="z-index: 999"]',
+      
+      // Popup patterns
+      'div[id*="popup"]', 'div[class*="popup"]',
+      'div[id*="modal"][class*="ad"]'
     ]
   };
 
@@ -37,21 +45,17 @@
   // ============================================================
   const killServiceWorkers = async () => {
     if (!navigator.serviceWorker) return;
-    
     try {
       const regs = await navigator.serviceWorker.getRegistrations();
       await Promise.all(regs.map(r => r.unregister()));
       if (regs.length > 0) log(`Killed ${regs.length} service workers`);
-    } catch (e) {
-      warn('SW kill failed');
-    }
+    } catch (e) {}
   };
 
   // ============================================================
   // 🚫 NETWORK BLOCKER
   // ============================================================
   const setupNetworkBlocker = () => {
-    // Patch fetch
     const origFetch = window.fetch;
     window.fetch = function(url, ...args) {
       const urlStr = url?.toString() || '';
@@ -62,7 +66,6 @@
       return origFetch.call(this, url, ...args);
     };
 
-    // Patch XHR
     const origOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function(method, url, ...args) {
       if (CONFIG.blocked.test(url) && !CONFIG.allowed.test(url)) {
@@ -83,88 +86,65 @@
   };
 
   // ============================================================
-  // 🧹 DOM CLEANER (Safe MutationObserver-based)
+  // 🧹 SMART DOM CLEANER
   // ============================================================
   let adCount = 0;
-  let isCleaning = false;
-  
+  let cleaningQueue = [];
+  let isProcessing = false;
+
   const cleanAds = (root = document) => {
-    if (!root || !root.querySelectorAll || isCleaning) return;
+    if (!root?.querySelectorAll || isProcessing) return;
     
-    isCleaning = true;
-    const selector = CONFIG.adSelectors.join(',');
+    isProcessing = true;
     
-    try {
-      // Convert to array to avoid live NodeList issues
-      const elements = Array.from(root.querySelectorAll(selector));
-      
-      elements.forEach(el => {
-        // Enhanced safety checks
-        if (!el || !el.parentNode || !el.isConnected) return;
-        if (el.closest('.watch-player, #embed-player, video, [id*="player"]')) return;
+    requestAnimationFrame(() => {
+      try {
+        const selector = CONFIG.adSelectors.join(',');
+        const elements = Array.from(root.querySelectorAll(selector));
         
-        // Additional safety: check if element is still in DOM
-        if (!document.contains(el)) return;
-        
-        try {
-          // Triple check before removal with timeout
-          const parent = el.parentNode;
-          if (parent && parent.contains(el) && document.contains(el)) {
-            // Use requestAnimationFrame to ensure DOM is stable
-            requestAnimationFrame(() => {
-              try {
-                if (parent && parent.contains(el) && document.contains(el)) {
-                  parent.removeChild(el);
-                  adCount++;
-                }
-              } catch (e) {
-                // Node was removed by another process
-              }
-            });
-          }
-        } catch (e) {
-          // Silently fail - node might be removed by another process
-        }
-      });
-
-      // Clean bad iframes with enhanced safety
-      const iframes = Array.from(root.querySelectorAll('iframe:not(#embed-player):not([id*="player"])'));
-      
-      iframes.forEach(iframe => {
-        if (!iframe || !iframe.parentNode || !iframe.isConnected) return;
-        if (!document.contains(iframe)) return;
-        
-        const src = iframe.src || '';
-        if (CONFIG.blocked.test(src)) {
+        elements.forEach(el => {
+          if (!el?.isConnected || !el.parentNode) return;
+          
+          // Skip player elements
+          const isPlayer = el.closest('.watch-player, #embed-player, #player, video, [id*="player"], .jwplayer');
+          if (isPlayer) return;
+          
+          // Additional check for JW Player structure
+          if (el.classList.contains('jw-wrapper') || el.classList.contains('jw-media')) return;
+          
           try {
-            const parent = iframe.parentNode;
-            if (parent && parent.contains(iframe) && document.contains(iframe)) {
-              requestAnimationFrame(() => {
-                try {
-                  if (parent && parent.contains(iframe) && document.contains(iframe)) {
-                    parent.removeChild(iframe);
-                    adCount++;
-                  }
-                } catch (e) {
-                  // Node was removed by another process
-                }
-              });
+            if (document.contains(el) && el.parentNode?.contains(el)) {
+              el.parentNode.removeChild(el);
+              adCount++;
             }
-          } catch (e) {
-            // Silently fail
-          }
-        }
-      });
-    } catch (e) {
-      warn('cleanAds error: ' + e.message);
-    } finally {
-      // Reset cleaning flag after a short delay
-      setTimeout(() => { isCleaning = false; }, 50);
-    }
+          } catch (e) {}
+        });
 
-    if (adCount > 0 && adCount % 10 === 0) {
-      log(`Removed ${adCount} ads`);
-    }
+        // Clean bad iframes
+        const iframes = Array.from(root.querySelectorAll('iframe:not(#embed-player):not([id*="player"])'));
+        iframes.forEach(iframe => {
+          if (!iframe?.isConnected || !iframe.parentNode) return;
+          
+          const src = iframe.src || iframe.getAttribute('data-src') || '';
+          if (CONFIG.blocked.test(src)) {
+            try {
+              if (document.contains(iframe) && iframe.parentNode?.contains(iframe)) {
+                iframe.parentNode.removeChild(iframe);
+                adCount++;
+              }
+            } catch (e) {}
+          }
+        });
+
+        if (adCount > 0 && adCount % 5 === 0) {
+          log(`Removed ${adCount} ads`);
+        }
+      } catch (e) {
+        warn('cleanAds error: ' + e.message);
+      } finally {
+        isProcessing = false;
+      }
+    });
   };
 
   // ============================================================
@@ -172,22 +152,17 @@
   // ============================================================
   let lastIframeFix = 0;
   const fixPlayerIframe = () => {
-    // Debounce to prevent spam
     const now = Date.now();
     if (now - lastIframeFix < 2000) return;
     lastIframeFix = now;
 
     try {
       const iframe = document.querySelector('iframe#embed-player, iframe[id*="player"]');
-      if (!iframe || !iframe.src) return;
+      if (!iframe?.src) return;
 
-      const src = iframe.src;
-      
-      // Check if infected
-      if (CONFIG.blocked.test(src)) {
+      if (CONFIG.blocked.test(iframe.src)) {
         warn('🔧 Fixing infected iframe...');
         
-        // Extract video ID from URL
         const match = location.pathname.match(/([A-Za-z0-9_-]{8,})/);
         if (!match) return;
         
@@ -198,9 +173,7 @@
         iframe.src = cleanUrl;
         log(`✅ Fixed iframe: ${videoId}`);
       }
-    } catch (e) {
-      warn('fixPlayerIframe error: ' + e.message);
-    }
+    } catch (e) {}
   };
 
   // Block iframe hijacking
@@ -214,140 +187,128 @@
   };
 
   // ============================================================
-  // 🎬 VIDEO CONTROLLER (Enhanced Safety)
+  // 🎬 ULTRA-AGGRESSIVE VIDEO CONTROLLER
   // ============================================================
   const patchedVideos = new WeakSet();
-  let isCheckingVideos = false;
+  let lastSkipTime = 0;
   
   const patchVideo = (video) => {
-    if (!video || !video.isConnected || patchedVideos.has(video)) return;
+    if (!video?.isConnected || patchedVideos.has(video)) return;
     patchedVideos.add(video);
 
-    // Enhanced pre-roll detection and skipping
-    const skipPreroll = () => {
+    // IMMEDIATE skip on load
+    const forceSkip = () => {
       try {
-        if (!video || !video.isConnected) return;
+        if (!video?.isConnected) return;
         
-        // Check if it's likely a pre-roll (short duration, early in video)
-        const isPreroll = video.currentTime < 3 && video.duration > 10;
+        const now = Date.now();
+        if (now - lastSkipTime < 500) return; // Debounce
         
-        if (isPreroll) {
-          // Enhanced ad detection using Goatembed patterns
-          const adSelectors = CONFIG.prerollPatterns.join(',');
-          const hasAd = document.querySelector(adSelectors);
+        const ct = video.currentTime;
+        const dur = video.duration;
+        
+        // Force skip ANY content before 3 seconds
+        if (ct < 3 && dur > 10) {
+          video.currentTime = 3;
+          lastSkipTime = now;
+          log('⚡ Force skipped to 3s');
+        }
+        
+        // Detect ad by checking if controls are hidden
+        const jwPlayer = video.closest('.jwplayer');
+        if (jwPlayer) {
+          const isAd = jwPlayer.classList.contains('jw-flag-ads') || 
+                      jwPlayer.classList.contains('jw-flag-ads-vpaid') ||
+                      document.querySelector('.jw-ad-group');
           
-          // Check JW Player ad state
-          const jwPlayer = video.closest('.jwplayer');
-          const isAdState = jwPlayer && jwPlayer.classList.contains('jw-flag-ads');
-          
-          if (hasAd || isAdState) {
-            // Try multiple skip methods
-            const skipButton = document.querySelector('.jw-skip, .skip-buttons .sb-button, [class*="skip"]');
-            if (skipButton && skipButton.offsetParent) {
-              skipButton.click();
-              log('⏭️ Clicked skip button');
-            } else {
-              // Force skip by jumping to content
-              video.currentTime = Math.min(3, video.duration - 1);
-              log('⏭️ Force skipped pre-roll');
-            }
+          if (isAd && ct < 30) {
+            video.currentTime = Math.min(dur - 1, 30);
+            lastSkipTime = now;
+            log('⚡ Detected JW ad, skipped to 30s');
           }
         }
-      } catch (e) {
-        // Silently fail
-      }
+      } catch (e) {}
     };
 
-    // Enhanced event listeners with cleanup
-    const timeUpdateHandler = () => {
-      requestAnimationFrame(skipPreroll);
-    };
+    // Run on EVERY frame
+    video.addEventListener('timeupdate', forceSkip, { passive: true });
     
-    const pauseHandler = () => {
-      setTimeout(() => {
-        if (!isCleaning) cleanAds();
-      }, 100);
-    };
-
-    video.addEventListener('timeupdate', timeUpdateHandler, { passive: true });
-    video.addEventListener('pause', pauseHandler, { passive: true });
+    // Also run on loadedmetadata (earliest possible)
+    video.addEventListener('loadedmetadata', () => {
+      setTimeout(forceSkip, 50);
+      setTimeout(forceSkip, 100);
+      setTimeout(forceSkip, 200);
+    }, { passive: true, once: true });
     
-    // Store handlers for cleanup
-    video._adblockHandlers = { timeUpdateHandler, pauseHandler };
+    // Run on play
+    video.addEventListener('play', () => {
+      forceSkip();
+      setTimeout(forceSkip, 100);
+      setTimeout(cleanAds, 100);
+    }, { passive: true });
     
-    log('🎬 Video patched');
+    video.addEventListener('pause', () => setTimeout(() => !isProcessing && cleanAds(), 100), { passive: true });
+    
+    log('🎬 Video ultra-patched');
   };
 
   const checkVideos = () => {
-    if (isCheckingVideos) return;
-    isCheckingVideos = true;
-    
     try {
-      const videos = Array.from(document.querySelectorAll('video'));
-      videos.forEach(video => {
-        if (video && video.isConnected) {
-          patchVideo(video);
-        }
-      });
+      // Patch all videos
+      document.querySelectorAll('video').forEach(patchVideo);
       
-      // Enhanced skip button detection for Goatembed
+      // AGGRESSIVE skip button clicking
       const skipSelectors = [
-        '.jw-skip', '.jw-skippable', '.skip-buttons .sb-button',
-        '[class*="skip"]:not([style*="none"])', '.ad-skip:not([style*="none"])'
+        '.jw-skip.jw-skippable',
+        '.jw-skip',
+        '[class*="skip"]:not([style*="none"])',
+        '.ad-skip',
+        'button[class*="skip"]',
+        '[class*="skip"][class*="btn"]',
+        '.skip-buttons .sb-button'
       ];
       
-      for (const selector of skipSelectors) {
-        const skip = document.querySelector(selector);
-        if (skip?.offsetParent && skip.isConnected && document.contains(skip)) {
-          try {
-            skip.click();
-            log(`⏭️ Auto-clicked skip: ${selector}`);
-            break; // Only click one skip button
-          } catch (e) {
-            // Skip button might be removed
+      for (const sel of skipSelectors) {
+        const skips = document.querySelectorAll(sel);
+        skips.forEach(skip => {
+          if (skip?.offsetParent && skip.isConnected) {
+            try {
+              skip.click();
+              log('⏭️ Auto-clicked: ' + sel);
+            } catch (e) {}
           }
-        }
+        });
       }
       
-      // Force remove JW Player ad state
-      const jwPlayers = document.querySelectorAll('.jwplayer.jw-flag-ads');
-      jwPlayers.forEach(player => {
+      // Remove JW Player ad controls
+      document.querySelectorAll('.jw-ad-group, .jw-ad-controls, .jw-skip:not(.jw-skippable)').forEach(el => {
         try {
-          player.classList.remove('jw-flag-ads');
-          log('🚫 Removed JW Player ad flag');
-        } catch (e) {
-          // Silently fail
-        }
+          if (el.parentNode?.contains(el)) {
+            el.parentNode.removeChild(el);
+          }
+        } catch (e) {}
       });
-      
-    } catch (e) {
-      warn('checkVideos error: ' + e.message);
-    } finally {
-      setTimeout(() => { isCheckingVideos = false; }, 100);
-    }
+    } catch (e) {}
   };
 
   // ============================================================
-  // 🚫 POPUP & CLICK BLOCKER
+  // 🚫 POPUP BLOCKER
   // ============================================================
   const setupPopupBlocker = () => {
-    // Override window.open
     window.open = function() {
       log('🚫 Blocked popup');
       return null;
     };
 
-    // Block ad clicks
     document.addEventListener('click', (e) => {
-      const bad = e.target.closest('[class*="man88"], [class*="lu88"], [href*="88."], [class*="ads"]');
-      if (bad && !bad.closest('video, #embed-player')) {
+      const bad = e.target.closest('[class*="man88"], [class*="lu88"], [href*="88."], [class*="ads"], [class*="popup"]');
+      if (bad && !bad.closest('video, #embed-player, .jwplayer')) {
         e.preventDefault();
         e.stopImmediatePropagation();
         log('🚫 Blocked ad click');
       }
     }, { capture: true });
 
-    // Block context menu on ads
     document.addEventListener('contextmenu', (e) => {
       const bad = e.target.closest('[class*="man88"], [class*="lu88"]');
       if (bad) e.preventDefault();
@@ -357,17 +318,22 @@
   };
 
   // ============================================================
-  // 🎨 CSS INJECTION
+  // 🎨 ULTRA-AGGRESSIVE CSS INJECTION
   // ============================================================
   const injectCSS = () => {
     const style = document.createElement('style');
     style.id = 'rophim-adblock-css';
     style.textContent = `
-      /* Hide ads */
+      /* Hide all ad patterns */
       [class*="man88"], [class*="lu88"], [class*="sspp"],
       [class*="catfish"], [href*="man88"], [href*="lu88"],
       .denied-box, .ad-overlay, .ima-ad-container,
-      [class*="preroll"], [class*="ads"]:not(.watch-player):not(#embed-player) {
+      [class*="preroll"], [class*="ads"]:not(.watch-player):not(#embed-player),
+      .sspp-area, .jw-ad, .jw-ad-container,
+      div[style*="position: fixed"][style*="z-index: 999"],
+      div[style*="position: fixed"][style*="z-index: 9999"],
+      div[id*="popup"][class*="ad"],
+      body > div[style*="position: fixed"]:not(#rp-player):not(.jwplayer) {
         display: none !important;
         visibility: hidden !important;
         opacity: 0 !important;
@@ -376,122 +342,102 @@
         width: 0 !important;
         height: 0 !important;
         overflow: hidden !important;
-      }
-
-      /* Goatembed specific ad blocking */
-      .jw-skip, .jw-skippable, .skip-buttons,
-      .jwplayer.jw-flag-ads, .jw-ads, .jw-ad-display,
-      .sspp-area.is-player, .sspp-area .display-single,
-      .jwplayer.jw-flag-ads .jw-controlbar,
-      .jwplayer.jw-flag-ads .jw-display {
-        display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
+        z-index: -9999 !important;
       }
 
       /* Ensure player visible */
-      .watch-player, video, #embed-player, [id*="player"],
-      #rp-player, #rp-player .main-player, #player {
+      .watch-player, video, #embed-player, #player,
+      [id*="player"]:not([class*="ad"]),
+      .jwplayer:not(.jw-ad) {
         display: block !important;
         visibility: visible !important;
         opacity: 1 !important;
-        position: relative !important;
-        z-index: 1 !important;
       }
 
-      /* Hide ad overlays */
-      body > div[style*="position: fixed"],
-      body > div[style*="z-index: 999"],
-      body > div[style*="z-index: 9999"] {
+      /* Remove pseudo-element ads */
+      *::before[content], *::after[content] {
+        content: none !important;
+      }
+
+      /* AGGRESSIVE: Hide JW Player ads */
+      .jw-ad-group, .jw-ad-controls, .jw-ad-control,
+      .jwplayer.jw-flag-ads .jw-skip:not(.jw-skippable),
+      .jwplayer.jw-flag-ads-vpaid,
+      .jw-ad-time-remaining {
+        display: none !important;
+        opacity: 0 !important;
+        width: 0 !important;
+        height: 0 !important;
+      }
+
+      /* Force skip button visible */
+      .jw-skip.jw-skippable {
+        display: flex !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+      }
+
+      /* Clean overlays */
+      body > div[style*="z-index"]:not(#rp-player):not(.jwplayer):not([id*="player"]) {
         display: none !important;
       }
 
-      /* Force video to play content */
-      .jwplayer:not(.jw-flag-ads) video {
-        display: block !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-      }
-
-      /* Hide pre-roll indicators */
-      .jw-skip, .jw-skippable, .skip-buttons .sb-button {
+      /* Hide JW Player ad overlay */
+      .jwplayer.jw-flag-ads .jw-media:not(video) {
         display: none !important;
       }
     `;
     (document.head || document.documentElement).appendChild(style);
-    log('CSS injected');
+    log('CSS ultra-injected');
   };
 
   // ============================================================
-  // 🔍 MUTATION OBSERVER (Enhanced Safety)
+  // 🔍 SMART OBSERVER
   // ============================================================
   let observerTimeout = null;
-  let observerQueue = [];
-  
   const setupObserver = () => {
     const observer = new MutationObserver((mutations) => {
-      // Enhanced debounce with queue management
       if (observerTimeout) return;
-      
-      // Add mutations to queue
-      observerQueue.push(...mutations);
       
       observerTimeout = setTimeout(() => {
         observerTimeout = null;
         
         let shouldClean = false;
-        let shouldCheckVideo = false;
-        let shouldFixIframe = false;
+        let shouldCheck = false;
 
         try {
-          // Process queued mutations
-          for (const mutation of observerQueue) {
+          for (const mutation of mutations) {
             for (const node of mutation.addedNodes) {
               if (node.nodeType !== 1) continue;
               
               const el = node;
+              const className = el.className || '';
+              const id = el.id || '';
               
-              // Enhanced safety check
-              if (!el || !el.isConnected) continue;
-              
-              // Check if it's an ad
-              if (el.matches && CONFIG.adSelectors.some(sel => {
-                try { return el.matches(sel); } catch(e) { return false; }
-              })) {
+              // Check for ads
+              if (
+                /man88|lu88|sspp|catfish|popup|ad-|preroll/i.test(className + id) ||
+                (el.matches && CONFIG.adSelectors.some(sel => {
+                  try { return el.matches(sel); } catch(e) { return false; }
+                }))
+              ) {
                 shouldClean = true;
               }
               
-              // Check if it's a video
-              if (el.tagName === 'VIDEO' || el.querySelector?.('video')) {
-                shouldCheckVideo = true;
-              }
-              
-              // Check if it's an iframe
-              if (el.tagName === 'IFRAME' || el.querySelector?.('iframe')) {
-                shouldFixIframe = true;
+              // Check for video/iframe
+              if (el.tagName === 'VIDEO' || el.tagName === 'IFRAME') {
+                shouldCheck = true;
               }
             }
           }
 
-          // Clear queue
-          observerQueue = [];
-
-          // Execute actions with safety delays
-          if (shouldClean) {
-            setTimeout(() => cleanAds(), 50);
+          if (shouldClean) cleanAds();
+          if (shouldCheck) {
+            checkVideos();
+            fixPlayerIframe();
           }
-          if (shouldCheckVideo) {
-            setTimeout(() => checkVideos(), 100);
-          }
-          if (shouldFixIframe) {
-            setTimeout(() => fixPlayerIframe(), 150);
-          }
-        } catch (e) {
-          warn('Observer error: ' + e.message);
-          observerQueue = []; // Clear queue on error
-        }
-      }, 150); // Increased debounce time
+        } catch (e) {}
+      }, 150);
     });
 
     observer.observe(document.documentElement, {
@@ -510,14 +456,11 @@
     let lastUrl = location.href;
     let isNavigating = false;
 
-    // Check for navigation (reduced frequency)
     const checkNavigation = () => {
       if (isNavigating) return;
       
       const current = location.href;
-      
       if (current !== lastUrl) {
-        // Block error pages
         if (CONFIG.blocked.test(current)) {
           warn('🚫 Blocked navigation to error page');
           isNavigating = true;
@@ -532,25 +475,20 @@
         lastUrl = current;
         isNavigating = true;
         
-        // Re-init after navigation
         setTimeout(() => {
           try {
             fixPlayerIframe();
             cleanAds();
             checkVideos();
-          } catch (e) {
-            warn('Re-init error: ' + e.message);
-          } finally {
+          } catch (e) {} finally {
             isNavigating = false;
           }
         }, 500);
       }
     };
 
-    // Monitor URL changes (reduced frequency)
     setInterval(checkNavigation, 2000);
 
-    // Block history manipulation
     const origPush = history.pushState;
     const origReplace = history.replaceState;
 
@@ -574,70 +512,34 @@
   };
 
   // ============================================================
-  // 🛡️ ERROR RECOVERY SYSTEM
-  // ============================================================
-  const setupErrorRecovery = () => {
-    // Global error handler
-    window.addEventListener('error', (e) => {
-      if (e.message.includes('removeChild') || e.message.includes('NotFoundError')) {
-        warn('🛡️ DOM error detected, resetting state...');
-        isCleaning = false;
-        isCheckingVideos = false;
-        observerQueue = [];
-      }
-    });
-
-    // Unhandled promise rejection handler
-    window.addEventListener('unhandledrejection', (e) => {
-      if (e.reason && e.reason.message && e.reason.message.includes('removeChild')) {
-        warn('🛡️ Promise rejection handled');
-        e.preventDefault();
-      }
-    });
-
-    log('Error recovery system active');
-  };
-
-  // ============================================================
-  // 🚀 INITIALIZATION (Enhanced)
+  // 🚀 INITIALIZATION
   // ============================================================
   const init = () => {
-    console.log('🚀 [RoPhim] AdBlock v1.1 - Enhanced Safety Edition');
+    console.log('🚀 [RoPhim] AdBlock v6.0 - Enhanced Edition');
 
-    // Phase 1: Immediate (before DOM)
     killServiceWorkers();
     setupNetworkBlocker();
     injectCSS();
     setupPopupBlocker();
-    setupErrorRecovery();
 
-    // Phase 2: DOM ready
     const onDOMReady = () => {
-      try {
-        // Initial cleanup with safety delays
-        setTimeout(() => cleanAds(), 100);
-        setTimeout(() => fixPlayerIframe(), 200);
-        setTimeout(() => checkVideos(), 300);
+      cleanAds();
+      fixPlayerIframe();
+      checkVideos();
 
-        // Setup observer
-        setupObserver();
-        
-        // Setup navigation monitor
-        setupNavigationMonitor();
+      setupObserver();
+      setupNavigationMonitor();
 
-        // Periodic checks (reduced frequency with safety)
-        setInterval(() => {
-          if (!isCleaning) fixPlayerIframe();
-        }, 3000);
-        
-        setInterval(() => {
-          if (!isCheckingVideos) checkVideos();
-        }, 2000);
+      // Periodic checks (more frequent for pre-roll)
+      setInterval(() => {
+        checkVideos(); // Check skip buttons
+      }, 500); // Every 500ms
+      
+      setInterval(() => {
+        fixPlayerIframe();
+      }, 3000);
 
-        log('✅ All systems active');
-      } catch (e) {
-        warn('Init error: ' + e.message);
-      }
+      log('✅ All systems active');
     };
 
     if (document.readyState === 'loading') {
@@ -650,17 +552,183 @@
   // ============================================================
   // 🎯 EXECUTE
   // ============================================================
-  
-  // Run immediately
   killServiceWorkers();
   setupNetworkBlocker();
 
-  // Start initialization
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
   }
 
-  console.log('✅ [RoPhim] AdBlock v1.0 ready');
+  console.log('✅ [RoPhim] AdBlock v1.2 ready');
+
+  // ============================================================
+  // 🎬 JW PLAYER AD BLOCKER
+  // ============================================================
+  const setupJWPlayerAdBlocker = () => {
+    console.log('🚫 JW Player Ad Blocker: Initializing...');
+    
+    let jwPlayerFound = false;
+    let overrideAttempts = 0;
+    
+    // Override JW Player advertising methods
+    const overrideJWPlayerAds = () => {
+      console.log('🔍 JW Ad Blocker: Checking for JW Player...');
+      console.log('🔍 window.jwplayer exists:', !!window.jwplayer);
+      console.log('🔍 window.jwplayer.prototype exists:', !!(window.jwplayer && window.jwplayer.prototype));
+      
+      if (window.jwplayer && window.jwplayer.prototype) {
+        console.log('✅ JW Player found! Setting up ad blocking...');
+        jwPlayerFound = true;
+        
+        const originalSetup = window.jwplayer.prototype.setup;
+        
+        // Override setup method để disable advertising
+        window.jwplayer.prototype.setup = function(config) {
+          console.log('🎬 JW Player setup called with config:', config);
+          
+          // Disable advertising trong config
+          if (config) {
+            config.advertising = {
+              client: 'none',
+              skipoffset: 0
+            };
+            console.log('🚫 JW Ad Blocker: Disabled advertising in config');
+          }
+          
+          const player = originalSetup.call(this, config);
+          
+          if (player) {
+            console.log('🎬 JW Player instance created, setting up ad blocking...');
+            
+            // Override ad methods
+            player.playAd = function() {
+              console.log('🚫 JW Ad Blocker: Ad play blocked - playing content');
+              return this;
+            };
+            
+            player.pauseAd = function() {
+              console.log('🚫 JW Ad Blocker: Ad pause blocked - continuing content');
+              return this;
+            };
+            
+            player.skipAd = function() {
+              console.log('⏭️ JW Ad Blocker: Ad skipped - playing content');
+              return this;
+            };
+            
+            // Auto-skip ads khi chúng bắt đầu
+            player.on('adStarted', function() {
+              console.log('🚫 JW Ad Blocker: Ad started - auto-skipping');
+              setTimeout(() => this.skipAd(), 100);
+            });
+            
+            player.on('adBreakStart', function() {
+              console.log('🚫 JW Ad Blocker: Ad break started - auto-skipping');
+              setTimeout(() => this.skipAd(), 100);
+            });
+            
+            player.on('adComplete', function() {
+              console.log('✅ JW Ad Blocker: Ad complete - continuing to content');
+            });
+            
+            player.on('adError', function() {
+              console.log('❌ JW Ad Blocker: Ad error - skipping to content');
+              this.skipAd();
+            });
+            
+            console.log('✅ JW Player ad blocking methods overridden for this instance');
+          }
+          
+          return player;
+        };
+        
+        console.log('✅ JW Player ad blocking methods overridden globally');
+      } else {
+        overrideAttempts++;
+        console.log(`⏳ JW Player not found yet (attempt ${overrideAttempts}/50)`);
+      }
+    };
+    
+    // Try immediately
+    overrideJWPlayerAds();
+    
+    // Wait for JW Player to load with more aggressive checking
+    const checkJWPlayer = setInterval(() => {
+      if (jwPlayerFound) {
+        clearInterval(checkJWPlayer);
+        console.log('✅ JW Player ad blocking activated');
+        return;
+      }
+      
+      overrideJWPlayerAds();
+      
+      if (overrideAttempts >= 50) {
+        clearInterval(checkJWPlayer);
+        console.log('⚠️ JW Player not found after 50 attempts - trying alternative approach...');
+        
+        // Alternative approach: Direct DOM manipulation
+        const alternativeAdBlocker = () => {
+          console.log('🔧 Trying alternative ad blocking approach...');
+          
+          // Remove any existing ad elements
+          const adElements = document.querySelectorAll('.jw-ad-group, .jw-ad-controls, .jw-ad-control, [class*="ad-"], [class*="preroll"]');
+          adElements.forEach(el => {
+            if (el.parentNode) {
+              el.parentNode.removeChild(el);
+              console.log('🚫 Removed ad element:', el.className);
+            }
+          });
+          
+          // Force click any skip buttons
+          const skipButtons = document.querySelectorAll('.jw-skip, [class*="skip"], button[class*="skip"]');
+          skipButtons.forEach(btn => {
+            if (btn.offsetParent) {
+              btn.click();
+              console.log('⏭️ Clicked skip button:', btn.className);
+            }
+          });
+          
+          // Look for video elements and force seek
+          const videos = document.querySelectorAll('video');
+          videos.forEach(video => {
+            if (video.currentTime < 5 && video.duration > 10) {
+              video.currentTime = 5;
+              console.log('⚡ Force seeked video to 5s');
+            }
+          });
+        };
+        
+        // Run alternative approach every 500ms
+        setInterval(alternativeAdBlocker, 500);
+        alternativeAdBlocker(); // Run immediately
+      }
+    }, 200);
+    
+    // Also monitor for script loading
+    const scriptObserver = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (node.nodeType === 1 && node.tagName === 'SCRIPT') {
+            const src = node.src || '';
+            if (src.includes('jwplayer') || src.includes('stuff.js')) {
+              console.log('🎬 JW Player script detected:', src);
+              setTimeout(() => {
+                overrideJWPlayerAds();
+              }, 1000);
+            }
+          }
+        });
+      });
+    });
+    
+    scriptObserver.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+  };
+  
+  // Initialize JW Player Ad Blocker
+  setupJWPlayerAdBlocker();
 })();
