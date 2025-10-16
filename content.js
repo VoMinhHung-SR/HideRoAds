@@ -52,6 +52,26 @@
     } catch (e) {}
   };
 
+  // Block Service Worker registration
+  const blockServiceWorkerRegistration = () => {
+    if (!navigator.serviceWorker) return;
+    
+    const originalRegister = navigator.serviceWorker.register;
+    navigator.serviceWorker.register = function(...args) {
+      log(`🚫 Blocked Service Worker registration: ${args[0]}`);
+      return Promise.resolve({
+        installing: null,
+        waiting: null,
+        active: null,
+        scope: '/',
+        update: () => Promise.resolve(),
+        unregister: () => Promise.resolve(true)
+      });
+    };
+    
+    log('Service Worker registration blocked');
+  };
+
   // ============================================================
   // 🚫 NETWORK BLOCKER
   // ============================================================
@@ -176,12 +196,27 @@
     } catch (e) {}
   };
 
-  // Block iframe hijacking
+  // Block iframe hijacking - ENHANCED
   const origSetAttr = Element.prototype.setAttribute;
   Element.prototype.setAttribute = function(name, value) {
-    if (name === 'src' && this.tagName === 'IFRAME' && CONFIG.blocked.test(value)) {
-      warn('🛡️ Blocked iframe hijack');
-      return;
+    if (name === 'src' && this.tagName === 'IFRAME') {
+      if (CONFIG.blocked.test(value) || /crash2\.html/i.test(value)) {
+        warn(`🛡️ Blocked iframe hijack: ${value}`);
+        
+        // Nếu là player iframe, fix lại URL đúng
+        if (this.id === 'embed-player' || this.id?.includes('player')) {
+          const match = location.pathname.match(/([A-Za-z0-9_-]{8,})/);
+          if (match) {
+            const videoId = match[0];
+            const params = new URLSearchParams(location.search);
+            const cleanUrl = `https://goatembed.com/${videoId}?ver=${params.get('ver')||1}&s=${params.get('s')||1}&ep=${params.get('ep')||1}`;
+            log(`✅ Redirected iframe to: ${cleanUrl}`);
+            return origSetAttr.call(this, name, cleanUrl);
+          }
+        }
+        
+        return; // Block hoàn toàn
+      }
     }
     return origSetAttr.call(this, name, value);
   };
@@ -207,11 +242,11 @@
         const ct = video.currentTime;
         const dur = video.duration;
         
-        // Force skip ANY content before 3 seconds
-        if (ct < 3 && dur > 10) {
-          video.currentTime = 3;
+        // Force skip ANY content before 5 seconds (preroll ads)
+        if (ct < 5 && dur > 10) {
+          video.currentTime = 5;
           lastSkipTime = now;
-          log('⚡ Force skipped to 3s');
+          log('⚡ Force skipped preroll to 5s');
         }
         
         // Detect ad by checking if controls are hidden
@@ -238,6 +273,14 @@
       setTimeout(forceSkip, 50);
       setTimeout(forceSkip, 100);
       setTimeout(forceSkip, 200);
+    }, { passive: true, once: true });
+    
+    // Skip preroll ngay khi video có thể play
+    video.addEventListener('canplay', () => {
+      if (video.currentTime < 5 && (video.duration || 0) > 10) {
+        video.currentTime = 5;
+        log('⚡ Preroll skipped on canplay');
+      }
     }, { passive: true, once: true });
     
     // Run on play
@@ -517,6 +560,7 @@
   const init = () => {
     console.log('🚀 [RoPhim] AdBlock v6.0 - Enhanced Edition');
 
+    blockServiceWorkerRegistration();
     killServiceWorkers();
     setupNetworkBlocker();
     injectCSS();
@@ -552,6 +596,7 @@
   // ============================================================
   // 🎯 EXECUTE
   // ============================================================
+  blockServiceWorkerRegistration();
   killServiceWorkers();
   setupNetworkBlocker();
 
