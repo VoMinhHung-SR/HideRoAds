@@ -5,7 +5,8 @@
 
   const log = msg => console.log(`✅ [RoPhim] ${msg}`);
   const warn = msg => console.warn(`⚠️ [RoPhim] ${msg}`);
-
+  blockServiceWorkerRegistration();
+  killServiceWorkers();
   // ============================================================
   // 🎯 ENHANCED CONFIG
   // ============================================================
@@ -40,17 +41,67 @@
     ]
   };
 
+  // // ============================================================
+  // // 🔥 SERVICE WORKER KILLER
+  // // ============================================================
+  // const killServiceWorkers = async () => {
+  //   if (!navigator.serviceWorker) return;
+  //   try {
+  //     const regs = await navigator.serviceWorker.getRegistrations();
+  //     await Promise.all(regs.map(r => r.unregister()));
+  //     if (regs.length > 0) log(`Killed ${regs.length} service workers`);
+  //   } catch (e) {}
+  // };
   // ============================================================
-  // 🔥 SERVICE WORKER KILLER
+  // 🔥 KILL SERVICE WORKER - HIGHEST PRIORITY
   // ============================================================
   const killServiceWorkers = async () => {
     if (!navigator.serviceWorker) return;
+    
     try {
       const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map(r => r.unregister()));
-      if (regs.length > 0) log(`Killed ${regs.length} service workers`);
-    } catch (e) {}
+      
+      if (regs.length > 0) {
+        log(`🔥 Found ${regs.length} service workers - killing...`);
+        
+        await Promise.all(regs.map(async (reg) => {
+          log(`🔥 Killing: ${reg.scope}`);
+          await reg.unregister();
+        }));
+        
+        log(`✅ Killed ${regs.length} service workers`);
+        
+        // Force reload to apply changes
+        if (regs.length > 0 && !sessionStorage.getItem('sw_killed')) {
+          sessionStorage.setItem('sw_killed', '1');
+          log('🔄 Reloading to clear SW cache...');
+          setTimeout(() => location.reload(), 100);
+        }
+      }
+    } catch (e) {
+      warn('Failed to kill service workers: ' + e.message);
+    }
   };
+
+  // // Block Service Worker registration
+  // const blockServiceWorkerRegistration = () => {
+  //   if (!navigator.serviceWorker) return;
+    
+  //   const originalRegister = navigator.serviceWorker.register;
+  //   navigator.serviceWorker.register = function(...args) {
+  //     log(`🚫 Blocked Service Worker registration: ${args[0]}`);
+  //     return Promise.resolve({
+  //       installing: null,
+  //       waiting: null,
+  //       active: null,
+  //       scope: '/',
+  //       update: () => Promise.resolve(),
+  //       unregister: () => Promise.resolve(true)
+  //     });
+  //   };
+    
+  //   log('Service Worker registration blocked');
+  // };
 
   // Block Service Worker registration
   const blockServiceWorkerRegistration = () => {
@@ -58,15 +109,8 @@
     
     const originalRegister = navigator.serviceWorker.register;
     navigator.serviceWorker.register = function(...args) {
-      log(`🚫 Blocked Service Worker registration: ${args[0]}`);
-      return Promise.resolve({
-        installing: null,
-        waiting: null,
-        active: null,
-        scope: '/',
-        update: () => Promise.resolve(),
-        unregister: () => Promise.resolve(true)
-      });
+      warn(`🚫 BLOCKED Service Worker registration: ${args[0]}`);
+      return Promise.reject(new Error('Service Worker blocked by extension'));
     };
     
     log('Service Worker registration blocked');
@@ -558,10 +602,10 @@
   // 🚀 INITIALIZATION
   // ============================================================
   const init = () => {
-    console.log('🚀 [RoPhim] AdBlock v6.0 - Enhanced Edition');
+    console.log('🚀 [RoPhim] AdBlock v1.4 - Enhanced Edition');
 
-    blockServiceWorkerRegistration();
-    killServiceWorkers();
+    // blockServiceWorkerRegistration();
+    // killServiceWorkers();
     setupNetworkBlocker();
     injectCSS();
     setupPopupBlocker();
@@ -596,8 +640,8 @@
   // ============================================================
   // 🎯 EXECUTE
   // ============================================================
-  blockServiceWorkerRegistration();
-  killServiceWorkers();
+  // blockServiceWorkerRegistration();
+  // killServiceWorkers();
   setupNetworkBlocker();
 
   if (document.readyState === 'loading') {
