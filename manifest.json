@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "🌿 RoPhim AdsBlock Pro",
-    "version": "1.4.1",
+    "version": "1.4.3",
     "description": "Chặn quảng cáo RoPhim",
     "icons": {
         "16": "icons/icon.png",

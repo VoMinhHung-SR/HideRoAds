@@ -1,5 +1,5 @@
 // ============================================================
-// 🎯 PRELOAD - PREVENT IFRAME HIJACKING
+// 🎯 PRELOAD - PREVENT REDIRECTS + JW PLAYER HOOK
 // ============================================================
 (() => {
   'use strict';
@@ -9,81 +9,150 @@
   
   if (!isRophim && !isGoatembed) return;
 
-  const log = msg => console.log(`✅ [RoPhim${isGoatembed ? ' iframe' : ''}] ${msg}`);
+  const log = msg => console.log(`✅ [${isGoatembed ? 'Goat' : 'RoPhim'}] ${msg}`);
 
   // ============================================================
-  // 🛡️ PROTECT IFRAME FROM HIJACKING
+  // 🛡️ PREVENT REDIRECTS (goatembed.com only)
   // ============================================================
   if (isGoatembed) {
     const originalHref = location.href;
     log(`🔒 Original URL: ${originalHref}`);
     
-    // Check for bad redirects
+    // Check if current URL is bad
     const isBadUrl = /crash2\.html|error\.html|\.jpg$/i.test(originalHref);
     
     if (isBadUrl) {
-      log(`🚫 BAD URL detected: ${originalHref}`);
+      log(`🚫 BAD URL detected on load`);
       
-      // Try to extract video ID from parent page
-      try {
-        const parentUrl = window.top.location.pathname;
-        const match = parentUrl.match(/([A-Za-z0-9_-]{8,})/);
-        
-        if (match) {
-          const videoId = match[1];
+      // Try to extract video ID and redirect
+      const match = originalHref.match(/goatembed\.com\/([A-Za-z0-9_-]+)/);
+      if (match) {
+        const videoId = match[1];
+        if (videoId !== 'resource') {
           const correctUrl = `https://goatembed.com/${videoId}?version=1`;
-          
-          log(`🔄 Redirecting to correct URL: ${correctUrl}`);
+          log(`🔄 Redirecting to: ${correctUrl}`);
           location.replace(correctUrl);
           return;
         }
-      } catch (e) {
-        log('⚠️ Cannot access parent URL (cross-origin)');
       }
       
-      // If can't get parent, block the page
-      log('🛑 Blocking bad page');
+      // If can't redirect, try parent
+      try {
+        const parentPath = window.top.location.pathname;
+        const parentMatch = parentPath.match(/([A-Za-z0-9_-]{8,})/);
+        
+        if (parentMatch) {
+          const videoId = parentMatch[1];
+          const correctUrl = `https://goatembed.com/${videoId}?version=1`;
+          log(`🔄 Redirecting from parent: ${correctUrl}`);
+          location.replace(correctUrl);
+          return;
+        }
+      } catch (e) {}
+      
+      // Show error
+      log('🛑 Showing error page');
       document.open();
-      document.write('<html><body style="margin:0;background:#000;display:flex;align-items:center;justify-content:center;color:#fff;font-family:sans-serif;"><h2>🚫 Blocked: Invalid URL</h2></body></html>');
+      document.write(`
+        <html>
+          <head><title>Blocked</title></head>
+          <body style="margin:0;background:#000;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;">
+            <div style="text-align:center;">
+              <h1>🚫 Invalid URL</h1>
+              <p>This page was blocked by RoPhim AdBlock</p>
+              <small>${originalHref}</small>
+            </div>
+          </body>
+        </html>
+      `);
       document.close();
       return;
     }
     
-    // Monitor for hijacking attempts
-    let redirectCount = 0;
-    const maxRedirects = 3;
+    // HOOK location to prevent redirects
+    let redirectBlocked = 0;
     
-    const checkHijack = setInterval(() => {
-      const currentHref = location.href;
+    // Hook location.replace
+    const originalReplace = location.replace.bind(location);
+    location.replace = function(url) {
+      const urlStr = url.toString();
       
-      if (currentHref !== originalHref) {
-        redirectCount++;
-        log(`⚠️ Hijack detected (${redirectCount}/${maxRedirects}): ${currentHref}`);
-        
-        // If redirected to bad URL
-        if (/crash2\.html|error\.html|\.jpg$/i.test(currentHref)) {
-          log('🚫 Blocked hijack - restoring original URL');
-          location.replace(originalHref);
-        }
-        
-        if (redirectCount >= maxRedirects) {
-          log('🛑 Too many redirects - stopping monitor');
-          clearInterval(checkHijack);
-        }
+      if (/crash2\.html|error\.html|\.jpg$/i.test(urlStr)) {
+        redirectBlocked++;
+        log(`🚫 BLOCKED location.replace(${redirectBlocked}): ${urlStr}`);
+        return;
       }
-    }, 500);
+      
+      log(`✅ Allow location.replace: ${urlStr}`);
+      return originalReplace(url);
+    };
     
-    // Stop monitoring after 10 seconds
+    // Hook location.href setter
+    const locationDesc = Object.getOwnPropertyDescriptor(Location.prototype, 'href');
+    Object.defineProperty(location, 'href', {
+      get: locationDesc.get,
+      set: function(url) {
+        const urlStr = url.toString();
+        
+        if (/crash2\.html|error\.html|\.jpg$/i.test(urlStr)) {
+          redirectBlocked++;
+          log(`🚫 BLOCKED location.href(${redirectBlocked}): ${urlStr}`);
+          return;
+        }
+        
+        log(`✅ Allow location.href: ${urlStr}`);
+        return locationDesc.set.call(this, url);
+      }
+    });
+    
+    // Hook window.location
+    try {
+      const windowLocationDesc = Object.getOwnPropertyDescriptor(window, 'location');
+      if (windowLocationDesc && windowLocationDesc.set) {
+        Object.defineProperty(window, 'location', {
+          get: windowLocationDesc.get,
+          set: function(url) {
+            const urlStr = url.toString();
+            
+            if (/crash2\.html|error\.html|\.jpg$/i.test(urlStr)) {
+              redirectBlocked++;
+              log(`🚫 BLOCKED window.location(${redirectBlocked}): ${urlStr}`);
+              return;
+            }
+            
+            log(`✅ Allow window.location: ${urlStr}`);
+            return windowLocationDesc.set.call(this, url);
+          }
+        });
+      }
+    } catch (e) {}
+    
+    // Hook assign
+    const originalAssign = location.assign.bind(location);
+    location.assign = function(url) {
+      const urlStr = url.toString();
+      
+      if (/crash2\.html|error\.html|\.jpg$/i.test(urlStr)) {
+        redirectBlocked++;
+        log(`🚫 BLOCKED location.assign(${redirectBlocked}): ${urlStr}`);
+        return;
+      }
+      
+      log(`✅ Allow location.assign: ${urlStr}`);
+      return originalAssign(url);
+    };
+    
+    log('🛡️ Redirect protection installed');
+    
+    // Monitor for 10 seconds
     setTimeout(() => {
-      clearInterval(checkHijack);
-      log('✅ Hijack protection timeout - assuming safe');
+      log(`✅ Protection ended - blocked ${redirectBlocked} redirects`);
     }, 10000);
   }
 
   // ============================================================
-  // 🔥 HOOK JWPLAYER - ULTRA EARLY
+  // 🔥 JW PLAYER HOOK
   // ============================================================
-  
   let jwplayerOriginal = null;
   let hookInstalled = false;
   
@@ -98,61 +167,83 @@
       set(value) {
         if (!value) return;
         
-        log('🎬 JW Player detected!');
+        log('🎬 JW Player library loaded');
         
+        // Wrap jwplayer function
         jwplayerOriginal = function(id) {
-          log(`🎬 jwplayer('${id || 'default'}') called`);
-          
           const player = value(id);
           if (!player) return player;
           
-          // Hook setup
+          // Hook setup method
           const originalSetup = player.setup;
           player.setup = function(config) {
-            log('🔧 setup() intercepted');
+            log('🔧 Player setup intercepted');
             
             if (config) {
-              log('📋 Config before:', JSON.stringify(config, null, 2).substring(0, 500));
-              
-              // Remove ads
+              // Remove advertising
               if (config.advertising) {
-                log('🚫 Removed: advertising');
                 delete config.advertising;
+                log('🚫 Removed advertising');
               }
               
+              // Clean playlist
               if (config.playlist) {
                 config.playlist = config.playlist.map(item => {
                   if (item.adschedule) delete item.adschedule;
                   if (item.advertising) delete item.advertising;
                   return item;
                 });
-                log('🚫 Cleaned playlist ads');
+                log('🚫 Cleaned playlist');
               }
               
               config.autostart = true;
-              log('✅ Set autostart = true');
+              log('✅ Set autostart');
             }
             
             const result = originalSetup.call(this, config);
             
             // Override ad methods
-            this.playAd = () => { log('🚫 playAd blocked'); this.play(); return this; };
-            this.pauseAd = () => { log('🚫 pauseAd blocked'); return this; };
-            this.skipAd = () => { log('⏭️ skipAd'); this.play(); return this; };
-            
-            // Events
-            this.on('ready', () => log('✅ Player READY'));
-            this.on('play', () => log('▶️ Playing'));
-            this.on('error', (e) => log('❌ Error:', e.message || 'unknown'));
-            
-            const adSkip = () => {
-              log('🚫 Ad event - skipping');
-              setTimeout(() => { this.skipAd(); this.play(); }, 50);
+            this.playAd = () => {
+              log('🚫 playAd() blocked');
+              this.play();
+              return this;
             };
             
-            this.on('adStarted', adSkip);
-            this.on('adBreakStart', adSkip);
-            this.on('adError', adSkip);
+            this.pauseAd = () => {
+              log('🚫 pauseAd() blocked');
+              return this;
+            };
+            
+            this.skipAd = () => {
+              log('⏭️ skipAd() called');
+              this.play();
+              return this;
+            };
+            
+            // Events
+            this.on('ready', () => log('✅ Player ready'));
+            this.on('play', () => log('▶️ Playing'));
+            this.on('pause', () => log('⏸️ Paused'));
+            this.on('error', (e) => log('❌ Error:', e.message || 'unknown'));
+            
+            // Auto-skip ads
+            const skipAd = () => {
+              log('🚫 Ad detected - skipping');
+              setTimeout(() => {
+                try {
+                  this.skipAd();
+                  this.play();
+                } catch (e) {}
+              }, 50);
+            };
+            
+            this.on('adStarted', skipAd);
+            this.on('adBreakStart', skipAd);
+            this.on('adImpression', skipAd);
+            this.on('adError', (e) => {
+              log('❌ Ad error - skipping');
+              this.skipAd();
+            });
             
             log('✅ Player setup complete');
             return result;
@@ -175,91 +266,49 @@
       configurable: true,
       enumerable: true
     });
-    
-    log('🎯 Hook ready');
   };
 
   installHook();
-  
+  log('🟢 Hook ready');
+
   // ============================================================
-  // 🔍 DEBUG & MONITOR
+  // 🔍 MONITOR
   // ============================================================
   const isInIframe = window !== window.top;
-  log(`📍 ${isInIframe ? 'IFRAME' : 'MAIN'} | ${location.hostname}`);
+  log(`📍 Context: ${isInIframe ? 'IFRAME' : 'MAIN'}`);
   
-  // Monitor jwplayer loading
+  // Check for jwplayer
   let checkCount = 0;
-  const checkJWPlayer = setInterval(() => {
+  const checkInterval = setInterval(() => {
     checkCount++;
     
     if (window.jwplayer && typeof window.jwplayer === 'function') {
-      log(`✅ jwplayer loaded after ${checkCount * 200}ms`);
-      clearInterval(checkJWPlayer);
+      log(`✅ jwplayer found after ${checkCount * 200}ms`);
+      clearInterval(checkInterval);
       return;
     }
     
     if (checkCount >= 30) {
-      log('⚠️ jwplayer NOT loaded after 6s');
+      log('⚠️ jwplayer not loaded after 6s');
       
-      // Debug: List scripts
+      // Debug info
       const scripts = document.querySelectorAll('script[src]');
-      if (scripts.length > 0) {
-        log(`📜 Found ${scripts.length} scripts:`);
-        scripts.forEach((s, i) => {
-          const url = s.src;
-          const filename = url.split('/').pop();
-          log(`  ${i + 1}. ${filename}`);
-        });
+      if (scripts.length === 0) {
+        log('⚠️ NO SCRIPTS - page may be hijacked!');
       } else {
-        log('⚠️ NO SCRIPTS found on page - page may be hijacked!');
-      }
-      
-      // Debug: Show page content
-      log('📄 Page title:', document.title);
-      log('📄 Body text:', document.body?.innerText?.substring(0, 200) || 'empty');
-      
-      clearInterval(checkJWPlayer);
-    }
-  }, 200);
-  
-  // Monitor script additions
-  const observeScripts = () => {
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        mutation.addedNodes.forEach((node) => {
-          if (node.nodeType === 1 && node.tagName === 'SCRIPT') {
-            const src = node.src || '';
-            const inline = !src && node.textContent?.length > 0;
-            
-            if (src) {
-              const filename = src.split('/').pop();
-              log(`📜 Script added: ${filename}`);
-              
-              if (/jwplayer|stuff\.js/i.test(src)) {
-                log('🎬 JW Player script detected!');
-              }
-            } else if (inline) {
-              log('📜 Inline script added');
-              
-              // Check if it contains jwplayer
-              if (node.textContent.includes('jwplayer')) {
-                log('🎬 JW Player inline script detected!');
-              }
-            }
+        log(`📜 ${scripts.length} scripts loaded`);
+        
+        // List first 5 scripts
+        scripts.forEach((s, i) => {
+          if (i < 5) {
+            const url = s.src;
+            const filename = url.split('/').pop();
+            log(`  ${i + 1}. ${filename}`);
           }
         });
-      });
-    });
-    
-    if (document.body) {
-      observer.observe(document.body, { childList: true, subtree: true });
-      log('👀 Monitoring scripts');
+      }
+      
+      clearInterval(checkInterval);
     }
-  };
-  
-  if (document.body) {
-    observeScripts();
-  } else {
-    document.addEventListener('DOMContentLoaded', observeScripts);
-  }
+  }, 200);
 })();
