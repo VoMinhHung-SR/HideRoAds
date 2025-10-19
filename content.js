@@ -1,823 +1,502 @@
+// ============================================================
+// 🛡️ ROPHIM ADBLOCK - ULTIMATE FIX V3
+// ============================================================
 (() => {
   'use strict';
 
-  if (!/rophim\./i.test(location.hostname)) return;
+  const isGoat = /goatembed\./i.test(location.hostname);
+  const isRophim = /rophim\./i.test(location.hostname);
+  
+  if (!isGoat && !isRophim) return;
 
-  const log = msg => console.log(`✅ [RoPhim] ${msg}`);
-  const warn = msg => console.warn(`⚠️ [RoPhim] ${msg}`);
-  blockServiceWorkerRegistration();
-  killServiceWorkers();
-  // ============================================================
-  // 🎯 ENHANCED CONFIG
-  // ============================================================
-  const CONFIG = {
-    blocked: /man88|lu88|crash2\.html|report_issue|\.ads\.|adserver|catfish|sspp|preroll|ad-overlay|ima-ad/i,
-    allowed: /goatembed\.com|rophim\.mx|rophim\.com/i,
-    adSelectors: [
-      // Classic ads
-      '[class*="man88"]', '[class*="lu88"]', '[class*="sspp"]', '[class*="catfish"]',
-      '[href*="man88"]', '[href*="lu88"]', '[href*="88."]',
-      '[src*="man88"]', '[src*="lu88"]',
-      
-      // Overlay ads
-      '.denied-box', '.ad-overlay', '.ima-ad-container',
-      '[class*="preroll"]', '[class*="ads"]',
-      
-      // SSPP ads from CSS
-      '.sspp-area', '[class*="sspp"]',
-      
-      // JW Player ads
-      '.jw-ad', '.jw-ad-container', '.jw-ad-group',
-      '.jw-ad-control', '.jw-ad-controls',
-      
-      // Generic overlay patterns
-      'div[style*="position: fixed"][style*="z-index: 999"]',
-      'div[style*="position: fixed"][style*="z-index: 9999"]',
-      'div[style*="position: absolute"][style*="z-index: 999"]',
-      
-      // Popup patterns
-      'div[id*="popup"]', 'div[class*="popup"]',
-      'div[id*="modal"][class*="ad"]'
-    ]
-  };
+  const log = msg => console.log(`✅ [${isGoat ? 'Goat' : 'RoPhim'}] ${msg}`);
+  const warn = msg => console.warn(`⚠️ [${isGoat ? 'Goat' : 'RoPhim'}] ${msg}`);
 
-  // // ============================================================
-  // // 🔥 SERVICE WORKER KILLER
-  // // ============================================================
-  // const killServiceWorkers = async () => {
-  //   if (!navigator.serviceWorker) return;
-  //   try {
-  //     const regs = await navigator.serviceWorker.getRegistrations();
-  //     await Promise.all(regs.map(r => r.unregister()));
-  //     if (regs.length > 0) log(`Killed ${regs.length} service workers`);
-  //   } catch (e) {}
-  // };
   // ============================================================
-  // 🔥 KILL SERVICE WORKER - HIGHEST PRIORITY
+  // 🚨 GOATEMBED: INSTANT URL CHECK
   // ============================================================
-  const killServiceWorkers = async () => {
-    if (!navigator.serviceWorker) return;
+  if (isGoat) {
+    const currentUrl = location.href;
+    // More precise bad URL detection - exclude player resource URLs
+    const isBadUrl = /crash2\.html|error\.html|resource\/crash|resource\/error/i.test(currentUrl) || 
+                     (/\.jpg$/i.test(currentUrl) && !/\/player\/|\/v1\/|\/resource\/embed/i.test(currentUrl));
     
-    try {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      
-      if (regs.length > 0) {
-        log(`🔥 Found ${regs.length} service workers - killing...`);
-        
-        await Promise.all(regs.map(async (reg) => {
-          log(`🔥 Killing: ${reg.scope}`);
-          await reg.unregister();
-        }));
-        
-        log(`✅ Killed ${regs.length} service workers`);
-        
-        // Force reload to apply changes
-        if (regs.length > 0 && !sessionStorage.getItem('sw_killed')) {
-          sessionStorage.setItem('sw_killed', '1');
-          log('🔄 Reloading to clear SW cache...');
-          setTimeout(() => location.reload(), 100);
-        }
-      }
-    } catch (e) {
-      warn('Failed to kill service workers: ' + e.message);
-    }
-  };
-
-  // // Block Service Worker registration
-  // const blockServiceWorkerRegistration = () => {
-  //   if (!navigator.serviceWorker) return;
-    
-  //   const originalRegister = navigator.serviceWorker.register;
-  //   navigator.serviceWorker.register = function(...args) {
-  //     log(`🚫 Blocked Service Worker registration: ${args[0]}`);
-  //     return Promise.resolve({
-  //       installing: null,
-  //       waiting: null,
-  //       active: null,
-  //       scope: '/',
-  //       update: () => Promise.resolve(),
-  //       unregister: () => Promise.resolve(true)
-  //     });
-  //   };
-    
-  //   log('Service Worker registration blocked');
-  // };
-
-  // Block Service Worker registration
-  const blockServiceWorkerRegistration = () => {
-    if (!navigator.serviceWorker) return;
-    
-    const originalRegister = navigator.serviceWorker.register;
-    navigator.serviceWorker.register = function(...args) {
-      warn(`🚫 BLOCKED Service Worker registration: ${args[0]}`);
-      return Promise.reject(new Error('Service Worker blocked by extension'));
+    // Extract video ID from current URL if possible
+    const getVideoId = (url) => {
+      const match = url.match(/goatembed\.com\/([A-Za-z0-9_-]{8,})/);
+      return match && match[1] !== 'resource' ? match[1] : null;
     };
     
-    log('Service Worker registration blocked');
-  };
+    const currentVideoId = getVideoId(currentUrl);
+    
+    if (isBadUrl) {
+      warn(`🔴 BAD URL detected: ${currentUrl}`);
+      
+      // Stop page loading
+      window.stop();
+      
+      // Try to get video ID from various sources
+      let videoId = null;
+      
+      // 1. From session storage (set by parent)
+      try {
+        videoId = sessionStorage.getItem('rophim_video_id');
+        if (videoId) log(`📦 Got video ID from storage: ${videoId}`);
+      } catch (e) {}
+      
+      // 2. From URL parameters
+      if (!videoId) {
+        const params = new URLSearchParams(location.search);
+        videoId = params.get('id') || params.get('v');
+        if (videoId) log(`🔗 Got video ID from params: ${videoId}`);
+      }
+      
+      // 3. From document.referrer
+      if (!videoId && document.referrer) {
+        videoId = getVideoId(document.referrer);
+        if (videoId) log(`↩️ Got video ID from referrer: ${videoId}`);
+      }
+      
+      // 4. From current URL (if it has one before crash2)
+      if (!videoId) {
+        videoId = currentVideoId;
+        if (videoId) log(`🎯 Got video ID from current URL: ${videoId}`);
+      }
+      
+      // If we have video ID, redirect
+      if (videoId) {
+        const correctUrl = `https://goatembed.com/${videoId}?version=1`;
+        
+        // Prevent infinite loop
+        const redirectKey = 'rophim_redirect_attempt';
+        const attempts = parseInt(sessionStorage.getItem(redirectKey) || '0');
+        
+        if (attempts >= 3) {
+          warn('🛑 Too many redirect attempts - showing error');
+        } else {
+          sessionStorage.setItem(redirectKey, String(attempts + 1));
+          log(`🔄 REDIRECT (attempt ${attempts + 1}): ${correctUrl}`);
+          
+          // Use replace to avoid history
+          location.replace(correctUrl);
+          
+          // Block everything
+          throw new Error('Redirecting...');
+        }
+      }
+      
+      // Can't fix - show error page
+      warn('🛑 Cannot determine video ID - showing error');
+      showErrorPage(currentUrl);
+      throw new Error('Bad URL blocked');
+    }
+    
+    // URL is clean - clear redirect counter
+    try {
+      sessionStorage.removeItem('rophim_redirect_attempt');
+      sessionStorage.setItem('rophim_video_id', currentVideoId || '');
+    } catch (e) {}
+    
+    log(`✅ URL is clean: ${currentUrl}`);
+  }
 
   // ============================================================
-  // 🚫 NETWORK BLOCKER
+  // 🖼️ ERROR PAGE
   // ============================================================
-  const setupNetworkBlocker = () => {
+  function showErrorPage(blockedUrl) {
+    document.open();
+    document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Blocked by RoPhim AdBlock</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body {
+            background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+            color: #fff;
+            font-family: -apple-system, system-ui, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+          }
+          .container {
+            text-align: center;
+            max-width: 600px;
+            background: rgba(0,0,0,0.3);
+            padding: 40px;
+            border-radius: 16px;
+            backdrop-filter: blur(10px);
+          }
+          .icon {
+            font-size: 80px;
+            margin-bottom: 20px;
+            animation: shake 0.5s infinite;
+          }
+          @keyframes shake {
+            0%, 100% { transform: rotate(-5deg); }
+            50% { transform: rotate(5deg); }
+          }
+          h1 {
+            font-size: 32px;
+            margin-bottom: 16px;
+            font-weight: 700;
+          }
+          p {
+            font-size: 16px;
+            opacity: 0.9;
+            line-height: 1.6;
+            margin-bottom: 12px;
+          }
+          .url {
+            background: rgba(0,0,0,0.4);
+            padding: 12px;
+            border-radius: 8px;
+            word-break: break-all;
+            font-size: 12px;
+            font-family: 'Courier New', monospace;
+            margin: 20px 0;
+            border-left: 4px solid #ef4444;
+          }
+          button {
+            background: #fff;
+            color: #dc2626;
+            border: none;
+            padding: 12px 32px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: all 0.2s;
+          }
+          button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(255,255,255,0.3);
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="icon">🚫</div>
+          <h1>Invalid URL Blocked</h1>
+          <p>This page attempted to load an advertising or error page.</p>
+          <p><strong>RoPhim AdBlock</strong> has blocked it to protect your experience.</p>
+          <div class="url">${blockedUrl.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+          <button onclick="window.parent.postMessage({type:'rophim_reload'}, '*')">🔄 Reload Video</button>
+          <button onclick="window.history.back()" style="margin-left: 10px;">← Go Back</button>
+        </div>
+      </body>
+      </html>
+    `);
+    document.close();
+  }
+
+  // ============================================================
+  // 🔒 REDIRECT PROTECTION (Goatembed)
+  // ============================================================
+  if (isGoat) {
+    const originalUrl = location.href;
+    let blockCount = 0;
+    
+    const blockRedirect = (method, url) => {
+      // Don't block player resource URLs
+      if (/\/player\/|\/v1\/|\/resource\/embed|U10BA1JTB1NXAVABU1JTVVcAA1dQBIED/i.test(url)) {
+        return null; // Allow
+      }
+      blockCount++;
+      warn(`🚫 BLOCKED ${method}(${blockCount}): ${url.substring(0, 80)}`);
+      return false;
+    };
+    
+    // Hook all redirect methods
+    const origReplace = location.replace.bind(location);
+    location.replace = function(url) {
+      const urlStr = String(url);
+      // Allow player resources
+      if (/\/player\/|\/v1\/|\/resource\/embed|U10BA1JTB1NXAVABU1JTVVcAA1dQBIED/i.test(urlStr)) {
+        return origReplace(urlStr);
+      }
+      if (/crash2|error|resource\/(?!embed)|\.jpg$/i.test(urlStr)) {
+        return blockRedirect('replace', urlStr);
+      }
+      return origReplace(urlStr);
+    };
+    
+    const origAssign = location.assign.bind(location);
+    location.assign = function(url) {
+      const urlStr = String(url);
+      if (/crash2|error|resource\/(?!embed)|\.jpg$/i.test(urlStr)) {
+        return blockRedirect('assign', urlStr);
+      }
+      return origAssign(urlStr);
+    };
+    
+    const hrefDesc = Object.getOwnPropertyDescriptor(Location.prototype, 'href');
+    Object.defineProperty(location, 'href', {
+      get: hrefDesc.get,
+      set(url) {
+        const urlStr = String(url);
+        if (/crash2|error|resource\/(?!embed)|\.jpg$/i.test(urlStr)) {
+          blockRedirect('href', urlStr);
+          return;
+        }
+        return hrefDesc.set.call(this, urlStr);
+      }
+    });
+    
+    log('🔒 Redirect protection active');
+    
+    // Report status to parent
+    setTimeout(() => {
+      log(`✅ Protected - blocked ${blockCount} redirects`);
+      try {
+        window.parent.postMessage({
+          type: 'rophim_status',
+          blocked: blockCount,
+          url: location.href
+        }, '*');
+      } catch (e) {}
+    }, 5000);
+  }
+
+  // ============================================================
+  // 🎯 ROPHIM: IFRAME MANAGER
+  // ============================================================
+  if (isRophim) {
+    // Listen for messages from iframe
+    window.addEventListener('message', (e) => {
+      if (e.data.type === 'rophim_reload') {
+        log('🔄 Reload requested from iframe');
+        location.reload();
+      }
+      
+      if (e.data.type === 'rophim_status') {
+        log(`📊 Iframe status: blocked ${e.data.blocked} redirects`);
+      }
+    });
+    
+    // Store video ID for iframe
+    const match = location.pathname.match(/([A-Za-z0-9_-]{8,})/);
+    if (match) {
+      try {
+        sessionStorage.setItem('rophim_video_id', match[0]);
+        log(`💾 Stored video ID: ${match[0]}`);
+      } catch (e) {}
+    }
+    
+    // Get correct iframe URL
+    const getCorrectUrl = () => {
+      if (!match) return null;
+      const params = new URLSearchParams(location.search);
+      return `https://goatembed.com/${match[0]}?version=${params.get('ver')||1}&season=${params.get('s')||1}&episode=${params.get('ep')||1}`;
+    };
+    
+    // Hook iframe creation
+    const origCreate = document.createElement;
+    document.createElement = function(tag, ...args) {
+      const el = origCreate.call(this, tag, ...args);
+      
+      if (tag.toLowerCase() === 'iframe') {
+        log('🎬 Iframe created - installing protections');
+        
+        const srcDesc = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src');
+        
+        Object.defineProperty(el, 'src', {
+          get: srcDesc.get,
+          set(url) {
+            const urlStr = String(url);
+            
+            // Block bad URLs
+            if (/crash2|error|resource\/(?!embed)|\.jpg$/i.test(urlStr)) {
+              const correct = getCorrectUrl();
+              if (correct) {
+                warn(`🛡️ Blocked iframe hijack: ${urlStr.substring(0, 60)}`);
+                log(`✅ Redirected to: ${correct}`);
+                return srcDesc.set.call(this, correct);
+              }
+            }
+            
+            // Fix wrong video ID
+            if (/goatembed\.com/i.test(urlStr) && match) {
+              if (!urlStr.includes(match[0])) {
+                const correct = getCorrectUrl();
+                if (correct) {
+                  warn(`🔧 Fixed wrong video ID in iframe`);
+                  return srcDesc.set.call(this, correct);
+                }
+              }
+            }
+            
+            return srcDesc.set.call(this, urlStr);
+          }
+        });
+      }
+      
+      return el;
+    };
+    
+    log('🛡️ Iframe manager active');
+  }
+
+  // ============================================================
+  // 🔥 JW PLAYER HOOK
+  // ============================================================
+  let jwOrig = null;
+  let hooked = false;
+  
+  Object.defineProperty(window, 'jwplayer', {
+    get: () => jwOrig,
+    set(val) {
+      if (!val || hooked) return;
+      hooked = true;
+      
+      log('🎬 JW Player detected');
+      
+      jwOrig = function(id) {
+        const player = val(id);
+        if (!player) return player;
+        
+        const origSetup = player.setup;
+        player.setup = function(cfg) {
+          log('⚙️ Player setup intercepted');
+          
+          if (cfg) {
+            // Remove ads
+            delete cfg.advertising;
+            if (cfg.playlist) {
+              cfg.playlist = cfg.playlist.map(item => {
+                delete item.adschedule;
+                delete item.advertising;
+                return item;
+              });
+            }
+            cfg.autostart = true;
+            log('✅ Cleaned config');
+          }
+          
+          const result = origSetup.call(this, cfg);
+          
+          // Override ad methods
+          this.playAd = () => { log('🚫 playAd blocked'); this.play(); return this; };
+          this.pauseAd = () => { log('🚫 pauseAd blocked'); return this; };
+          this.skipAd = () => { log('⏭️ skipAd called'); this.play(); return this; };
+          
+          // Auto-skip
+          const skip = () => {
+            setTimeout(() => {
+              try { this.skipAd(); this.play(); } catch(e) {}
+            }, 50);
+          };
+          
+          this.on('adStarted', skip);
+          this.on('adBreakStart', skip);
+          this.on('adImpression', skip);
+          this.on('adError', () => { log('❌ Ad error'); skip(); });
+          
+          this.on('ready', () => log('✅ Player ready'));
+          
+          return result;
+        };
+        
+        return player;
+      };
+      
+      Object.keys(val).forEach(k => {
+        try { jwOrig[k] = val[k]; } catch(e) {}
+      });
+      
+      if (val.prototype) jwOrig.prototype = val.prototype;
+      
+      log('✅ JW Player hooked');
+    },
+    configurable: true
+  });
+
+  // ============================================================
+  // 🧹 CONTENT PROTECTION (RoPhim)
+  // ============================================================
+  if (isRophim) {
+    // Kill Service Workers
+    (async () => {
+      if (!navigator.serviceWorker) return;
+      
+      const regs = await navigator.serviceWorker.getRegistrations();
+      if (regs.length > 0) {
+        warn(`🔥 Killing ${regs.length} service workers`);
+        await Promise.all(regs.map(r => r.unregister()));
+        log('✅ Service workers killed');
+      }
+      
+      // Block new registrations
+      const orig = navigator.serviceWorker.register;
+      navigator.serviceWorker.register = () => {
+        warn('🚫 Service Worker registration blocked');
+        return Promise.reject(new Error('Blocked by AdBlock'));
+      };
+    })();
+
+    // Network blocker - UPDATED to allow player resources
+    const BAD = /crash2|error|man88|lu88|report_issue|\.ads\.|adserver|catfish|sspp|preroll|ad-overlay|ima-ad/i;
+    const ALLOW = /\/player\/|\/v1\/|\/resource\/embed|goatembed\.com\/v1\/player/i;
+    
     const origFetch = window.fetch;
     window.fetch = function(url, ...args) {
-      const urlStr = url?.toString() || '';
-      if (CONFIG.blocked.test(urlStr) && !CONFIG.allowed.test(urlStr)) {
-        log(`🚫 Fetch: ${urlStr.slice(0, 40)}...`);
-        return Promise.resolve(new Response('', { status: 204 }));
+      const urlStr = String(url);
+      if (BAD.test(urlStr) && !ALLOW.test(urlStr)) {
+        log(`🚫 Blocked fetch: ${urlStr.substring(0, 50)}`);
+        return Promise.resolve(new Response('', {status: 204}));
       }
       return origFetch.call(this, url, ...args);
     };
-
+    
     const origOpen = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function(method, url, ...args) {
-      if (CONFIG.blocked.test(url) && !CONFIG.allowed.test(url)) {
+    XMLHttpRequest.prototype.open = function(m, url, ...args) {
+      if (BAD.test(url)) {
         this._blocked = true;
-        log(`🚫 XHR: ${url.slice(0, 40)}...`);
+        log(`🚫 Blocked XHR: ${url.substring(0, 50)}`);
         return;
       }
-      return origOpen.call(this, method, url, ...args);
+      return origOpen.call(this, m, url, ...args);
     };
-
+    
     const origSend = XMLHttpRequest.prototype.send;
     XMLHttpRequest.prototype.send = function(...args) {
       if (this._blocked) return;
       return origSend.call(this, ...args);
     };
 
-    log('Network blocker active');
-  };
-
-  // ============================================================
-  // 🧹 SMART DOM CLEANER
-  // ============================================================
-  let adCount = 0;
-  let cleaningQueue = [];
-  let isProcessing = false;
-
-  const cleanAds = (root = document) => {
-    if (!root?.querySelectorAll || isProcessing) return;
-    
-    isProcessing = true;
-    
-    requestAnimationFrame(() => {
-      try {
-        const selector = CONFIG.adSelectors.join(',');
-        const elements = Array.from(root.querySelectorAll(selector));
-        
-        elements.forEach(el => {
-          if (!el?.isConnected || !el.parentNode) return;
-          
-          // Skip player elements
-          const isPlayer = el.closest('.watch-player, #embed-player, #player, video, [id*="player"], .jwplayer');
-          if (isPlayer) return;
-          
-          // Additional check for JW Player structure
-          if (el.classList.contains('jw-wrapper') || el.classList.contains('jw-media')) return;
-          
-          try {
-            if (document.contains(el) && el.parentNode?.contains(el)) {
-              el.parentNode.removeChild(el);
-              adCount++;
-            }
-          } catch (e) {}
-        });
-
-        // Clean bad iframes
-        const iframes = Array.from(root.querySelectorAll('iframe:not(#embed-player):not([id*="player"])'));
-        iframes.forEach(iframe => {
-          if (!iframe?.isConnected || !iframe.parentNode) return;
-          
-          const src = iframe.src || iframe.getAttribute('data-src') || '';
-          if (CONFIG.blocked.test(src)) {
-            try {
-              if (document.contains(iframe) && iframe.parentNode?.contains(iframe)) {
-                iframe.parentNode.removeChild(iframe);
-                adCount++;
-              }
-            } catch (e) {}
-          }
-        });
-
-        if (adCount > 0 && adCount % 5 === 0) {
-          log(`Removed ${adCount} ads`);
-        }
-      } catch (e) {
-        warn('cleanAds error: ' + e.message);
-      } finally {
-        isProcessing = false;
-      }
-    });
-  };
-
-  // ============================================================
-  // 🩹 IFRAME FIXER
-  // ============================================================
-  let lastIframeFix = 0;
-  const fixPlayerIframe = () => {
-    const now = Date.now();
-    if (now - lastIframeFix < 2000) return;
-    lastIframeFix = now;
-
-    try {
-      const iframe = document.querySelector('iframe#embed-player, iframe[id*="player"]');
-      if (!iframe?.src) return;
-
-      if (CONFIG.blocked.test(iframe.src)) {
-        warn('🔧 Fixing infected iframe...');
-        
-        const match = location.pathname.match(/([A-Za-z0-9_-]{8,})/);
-        if (!match) return;
-        
-        const videoId = match[0];
-        const params = new URLSearchParams(location.search);
-        const cleanUrl = `https://goatembed.com/${videoId}?ver=${params.get('ver')||1}&s=${params.get('s')||1}&ep=${params.get('ep')||1}`;
-        
-        iframe.src = cleanUrl;
-        log(`✅ Fixed iframe: ${videoId}`);
-      }
-    } catch (e) {}
-  };
-
-  // Block iframe hijacking - ENHANCED
-  const origSetAttr = Element.prototype.setAttribute;
-  Element.prototype.setAttribute = function(name, value) {
-    if (name === 'src' && this.tagName === 'IFRAME') {
-      if (CONFIG.blocked.test(value) || /crash2\.html/i.test(value)) {
-        warn(`🛡️ Blocked iframe hijack: ${value}`);
-        
-        // Nếu là player iframe, fix lại URL đúng
-        if (this.id === 'embed-player' || this.id?.includes('player')) {
-          const match = location.pathname.match(/([A-Za-z0-9_-]{8,})/);
-          if (match) {
-            const videoId = match[0];
-            const params = new URLSearchParams(location.search);
-            const cleanUrl = `https://goatembed.com/${videoId}?ver=${params.get('ver')||1}&s=${params.get('s')||1}&ep=${params.get('ep')||1}`;
-            log(`✅ Redirected iframe to: ${cleanUrl}`);
-            return origSetAttr.call(this, name, cleanUrl);
-          }
-        }
-        
-        return; // Block hoàn toàn
-      }
-    }
-    return origSetAttr.call(this, name, value);
-  };
-
-  // ============================================================
-  // 🎬 ULTRA-AGGRESSIVE VIDEO CONTROLLER
-  // ============================================================
-  const patchedVideos = new WeakSet();
-  let lastSkipTime = 0;
-  
-  const patchVideo = (video) => {
-    if (!video?.isConnected || patchedVideos.has(video)) return;
-    patchedVideos.add(video);
-
-    // IMMEDIATE skip on load
-    const forceSkip = () => {
-      try {
-        if (!video?.isConnected) return;
-        
-        const now = Date.now();
-        if (now - lastSkipTime < 500) return; // Debounce
-        
-        const ct = video.currentTime;
-        const dur = video.duration;
-        
-        // Force skip ANY content before 5 seconds (preroll ads)
-        if (ct < 5 && dur > 10) {
-          video.currentTime = 5;
-          lastSkipTime = now;
-          log('⚡ Force skipped preroll to 5s');
-        }
-        
-        // Detect ad by checking if controls are hidden
-        const jwPlayer = video.closest('.jwplayer');
-        if (jwPlayer) {
-          const isAd = jwPlayer.classList.contains('jw-flag-ads') || 
-                      jwPlayer.classList.contains('jw-flag-ads-vpaid') ||
-                      document.querySelector('.jw-ad-group');
-          
-          if (isAd && ct < 30) {
-            video.currentTime = Math.min(dur - 1, 30);
-            lastSkipTime = now;
-            log('⚡ Detected JW ad, skipped to 30s');
-          }
-        }
-      } catch (e) {}
-    };
-
-    // Run on EVERY frame
-    video.addEventListener('timeupdate', forceSkip, { passive: true });
-    
-    // Also run on loadedmetadata (earliest possible)
-    video.addEventListener('loadedmetadata', () => {
-      setTimeout(forceSkip, 50);
-      setTimeout(forceSkip, 100);
-      setTimeout(forceSkip, 200);
-    }, { passive: true, once: true });
-    
-    // Skip preroll ngay khi video có thể play
-    video.addEventListener('canplay', () => {
-      if (video.currentTime < 5 && (video.duration || 0) > 10) {
-        video.currentTime = 5;
-        log('⚡ Preroll skipped on canplay');
-      }
-    }, { passive: true, once: true });
-    
-    // Run on play
-    video.addEventListener('play', () => {
-      forceSkip();
-      setTimeout(forceSkip, 100);
-      setTimeout(cleanAds, 100);
-    }, { passive: true });
-    
-    video.addEventListener('pause', () => setTimeout(() => !isProcessing && cleanAds(), 100), { passive: true });
-    
-    log('🎬 Video ultra-patched');
-  };
-
-  const checkVideos = () => {
-    try {
-      // Patch all videos
-      document.querySelectorAll('video').forEach(patchVideo);
-      
-      // AGGRESSIVE skip button clicking
-      const skipSelectors = [
-        '.jw-skip.jw-skippable',
-        '.jw-skip',
-        '[class*="skip"]:not([style*="none"])',
-        '.ad-skip',
-        'button[class*="skip"]',
-        '[class*="skip"][class*="btn"]',
-        '.skip-buttons .sb-button'
-      ];
-      
-      for (const sel of skipSelectors) {
-        const skips = document.querySelectorAll(sel);
-        skips.forEach(skip => {
-          if (skip?.offsetParent && skip.isConnected) {
-            try {
-              skip.click();
-              log('⏭️ Auto-clicked: ' + sel);
-            } catch (e) {}
-          }
-        });
-      }
-      
-      // Remove JW Player ad controls
-      document.querySelectorAll('.jw-ad-group, .jw-ad-controls, .jw-skip:not(.jw-skippable)').forEach(el => {
-        try {
-          if (el.parentNode?.contains(el)) {
-            el.parentNode.removeChild(el);
-          }
-        } catch (e) {}
-      });
-    } catch (e) {}
-  };
-
-  // ============================================================
-  // 🚫 POPUP BLOCKER
-  // ============================================================
-  const setupPopupBlocker = () => {
-    window.open = function() {
-      log('🚫 Blocked popup');
-      return null;
-    };
-
-    document.addEventListener('click', (e) => {
-      const bad = e.target.closest('[class*="man88"], [class*="lu88"], [href*="88."], [class*="ads"], [class*="popup"]');
-      if (bad && !bad.closest('video, #embed-player, .jwplayer')) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        log('🚫 Blocked ad click');
-      }
-    }, { capture: true });
-
-    document.addEventListener('contextmenu', (e) => {
-      const bad = e.target.closest('[class*="man88"], [class*="lu88"]');
-      if (bad) e.preventDefault();
-    }, { capture: true });
-
-    log('Popup blocker active');
-  };
-
-  // ============================================================
-  // 🎨 ULTRA-AGGRESSIVE CSS INJECTION
-  // ============================================================
-  const injectCSS = () => {
+    // CSS injection
     const style = document.createElement('style');
-    style.id = 'rophim-adblock-css';
     style.textContent = `
-      /* Hide all ad patterns */
       [class*="man88"], [class*="lu88"], [class*="sspp"],
-      [class*="catfish"], [href*="man88"], [href*="lu88"],
       .denied-box, .ad-overlay, .ima-ad-container,
-      [class*="preroll"], [class*="ads"]:not(.watch-player):not(#embed-player),
-      .sspp-area, .jw-ad, .jw-ad-container,
-      div[style*="position: fixed"][style*="z-index: 999"],
-      div[style*="position: fixed"][style*="z-index: 9999"],
-      div[id*="popup"][class*="ad"],
-      body > div[style*="position: fixed"]:not(#rp-player):not(.jwplayer) {
-        display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-        position: absolute !important;
-        width: 0 !important;
-        height: 0 !important;
-        overflow: hidden !important;
-        z-index: -9999 !important;
-      }
-
-      /* Ensure player visible */
-      .watch-player, video, #embed-player, #player,
-      [id*="player"]:not([class*="ad"]),
-      .jwplayer:not(.jw-ad) {
-        display: block !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-      }
-
-      /* Remove pseudo-element ads */
-      *::before[content], *::after[content] {
-        content: none !important;
-      }
-
-      /* AGGRESSIVE: Hide JW Player ads */
-      .jw-ad-group, .jw-ad-controls, .jw-ad-control,
-      .jwplayer.jw-flag-ads .jw-skip:not(.jw-skippable),
-      .jwplayer.jw-flag-ads-vpaid,
-      .jw-ad-time-remaining {
-        display: none !important;
-        opacity: 0 !important;
-        width: 0 !important;
-        height: 0 !important;
-      }
-
-      /* Force skip button visible */
-      .jw-skip.jw-skippable {
-        display: flex !important;
-        opacity: 1 !important;
-        pointer-events: auto !important;
-      }
-
-      /* Clean overlays */
-      body > div[style*="z-index"]:not(#rp-player):not(.jwplayer):not([id*="player"]) {
-        display: none !important;
-      }
-
-      /* Hide JW Player ad overlay */
-      .jwplayer.jw-flag-ads .jw-media:not(video) {
-        display: none !important;
-      }
+      [class*="preroll"], [class*="ads"]:not(.watch-player),
+      .jw-ad, .jw-ad-container { display: none !important; }
     `;
     (document.head || document.documentElement).appendChild(style);
-    log('CSS ultra-injected');
-  };
 
-  // ============================================================
-  // 🔍 SMART OBSERVER
-  // ============================================================
-  let observerTimeout = null;
-  const setupObserver = () => {
-    const observer = new MutationObserver((mutations) => {
-      if (observerTimeout) return;
-      
-      observerTimeout = setTimeout(() => {
-        observerTimeout = null;
-        
-        let shouldClean = false;
-        let shouldCheck = false;
+    // Popup blocker
+    window.open = () => { log('🚫 Blocked popup'); return null; };
 
-        try {
-          for (const mutation of mutations) {
-            for (const node of mutation.addedNodes) {
-              if (node.nodeType !== 1) continue;
-              
-              const el = node;
-              const className = el.className || '';
-              const id = el.id || '';
-              
-              // Check for ads
-              if (
-                /man88|lu88|sspp|catfish|popup|ad-|preroll/i.test(className + id) ||
-                (el.matches && CONFIG.adSelectors.some(sel => {
-                  try { return el.matches(sel); } catch(e) { return false; }
-                }))
-              ) {
-                shouldClean = true;
-              }
-              
-              // Check for video/iframe
-              if (el.tagName === 'VIDEO' || el.tagName === 'IFRAME') {
-                shouldCheck = true;
-              }
-            }
-          }
-
-          if (shouldClean) cleanAds();
-          if (shouldCheck) {
-            checkVideos();
-            fixPlayerIframe();
-          }
-        } catch (e) {}
-      }, 150);
-    });
-
-    observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true
-    });
-
-    log('Observer active');
-    return observer;
-  };
-
-  // ============================================================
-  // 🔄 NAVIGATION MONITOR
-  // ============================================================
-  const setupNavigationMonitor = () => {
-    let lastUrl = location.href;
-    let isNavigating = false;
-
-    const checkNavigation = () => {
-      if (isNavigating) return;
-      
-      const current = location.href;
-      if (current !== lastUrl) {
-        if (CONFIG.blocked.test(current)) {
-          warn('🚫 Blocked navigation to error page');
-          isNavigating = true;
-          setTimeout(() => {
-            history.back();
-            isNavigating = false;
-          }, 100);
-          return;
-        }
-        
-        log('🔄 Navigation detected');
-        lastUrl = current;
-        isNavigating = true;
-        
-        setTimeout(() => {
-          try {
-            fixPlayerIframe();
-            cleanAds();
-            checkVideos();
-          } catch (e) {} finally {
-            isNavigating = false;
-          }
-        }, 500);
-      }
+    // DOM cleaner
+    const clean = () => {
+      const sel = '[class*="man88"],[class*="lu88"],[class*="sspp"],.denied-box,.ad-overlay';
+      document.querySelectorAll(sel).forEach(el => {
+        if (!el.closest('video,#embed-player,.jwplayer')) el.remove();
+      });
     };
 
-    setInterval(checkNavigation, 2000);
+    setInterval(clean, 2000);
+    
+    const obs = new MutationObserver(clean);
+    obs.observe(document.documentElement, { childList: true, subtree: true });
 
-    const origPush = history.pushState;
-    const origReplace = history.replaceState;
-
-    history.pushState = function(...args) {
-      if (args[2] && CONFIG.blocked.test(args[2])) {
-        warn('🚫 Blocked pushState');
-        return;
-      }
-      return origPush.apply(this, args);
-    };
-
-    history.replaceState = function(...args) {
-      if (args[2] && CONFIG.blocked.test(args[2])) {
-        warn('🚫 Blocked replaceState');
-        return;
-      }
-      return origReplace.apply(this, args);
-    };
-
-    log('Navigation monitor active');
-  };
-
-  // ============================================================
-  // 🚀 INITIALIZATION
-  // ============================================================
-  const init = () => {
-    console.log('🚀 [RoPhim] AdBlock v1.4 - Enhanced Edition');
-
-    // blockServiceWorkerRegistration();
-    // killServiceWorkers();
-    setupNetworkBlocker();
-    injectCSS();
-    setupPopupBlocker();
-
-    const onDOMReady = () => {
-      cleanAds();
-      fixPlayerIframe();
-      checkVideos();
-
-      setupObserver();
-      setupNavigationMonitor();
-
-      // Periodic checks (more frequent for pre-roll)
-      setInterval(() => {
-        checkVideos(); // Check skip buttons
-      }, 500); // Every 500ms
-      
-      setInterval(() => {
-        fixPlayerIframe();
-      }, 3000);
-
-      log('✅ All systems active');
-    };
-
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', onDOMReady);
-    } else {
-      onDOMReady();
-    }
-  };
-
-  // ============================================================
-  // 🎯 EXECUTE
-  // ============================================================
-  // blockServiceWorkerRegistration();
-  // killServiceWorkers();
-  setupNetworkBlocker();
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
+    log('✅ Content protection active');
   }
 
-  console.log('✅ [RoPhim] AdBlock v1.2 ready');
-
-  // ============================================================
-  // 🎬 JW PLAYER AD BLOCKER
-  // ============================================================
-  const setupJWPlayerAdBlocker = () => {
-    console.log('🚫 JW Player Ad Blocker: Initializing...');
-    
-    let jwPlayerFound = false;
-    let overrideAttempts = 0;
-    
-    // Override JW Player advertising methods
-    const overrideJWPlayerAds = () => {
-      console.log('🔍 JW Ad Blocker: Checking for JW Player...');
-      console.log('🔍 window.jwplayer exists:', !!window.jwplayer);
-      console.log('🔍 window.jwplayer.prototype exists:', !!(window.jwplayer && window.jwplayer.prototype));
-      
-      if (window.jwplayer && window.jwplayer.prototype) {
-        console.log('✅ JW Player found! Setting up ad blocking...');
-        jwPlayerFound = true;
-        
-        const originalSetup = window.jwplayer.prototype.setup;
-        
-        // Override setup method để disable advertising
-        window.jwplayer.prototype.setup = function(config) {
-          console.log('🎬 JW Player setup called with config:', config);
-          
-          // Disable advertising trong config
-          if (config) {
-            config.advertising = {
-              client: 'none',
-              skipoffset: 0
-            };
-            console.log('🚫 JW Ad Blocker: Disabled advertising in config');
-          }
-          
-          const player = originalSetup.call(this, config);
-          
-          if (player) {
-            console.log('🎬 JW Player instance created, setting up ad blocking...');
-            
-            // Override ad methods
-            player.playAd = function() {
-              console.log('🚫 JW Ad Blocker: Ad play blocked - playing content');
-              return this;
-            };
-            
-            player.pauseAd = function() {
-              console.log('🚫 JW Ad Blocker: Ad pause blocked - continuing content');
-              return this;
-            };
-            
-            player.skipAd = function() {
-              console.log('⏭️ JW Ad Blocker: Ad skipped - playing content');
-              return this;
-            };
-            
-            // Auto-skip ads khi chúng bắt đầu
-            player.on('adStarted', function() {
-              console.log('🚫 JW Ad Blocker: Ad started - auto-skipping');
-              setTimeout(() => this.skipAd(), 100);
-            });
-            
-            player.on('adBreakStart', function() {
-              console.log('🚫 JW Ad Blocker: Ad break started - auto-skipping');
-              setTimeout(() => this.skipAd(), 100);
-            });
-            
-            player.on('adComplete', function() {
-              console.log('✅ JW Ad Blocker: Ad complete - continuing to content');
-            });
-            
-            player.on('adError', function() {
-              console.log('❌ JW Ad Blocker: Ad error - skipping to content');
-              this.skipAd();
-            });
-            
-            console.log('✅ JW Player ad blocking methods overridden for this instance');
-          }
-          
-          return player;
-        };
-        
-        console.log('✅ JW Player ad blocking methods overridden globally');
-      } else {
-        overrideAttempts++;
-        console.log(`⏳ JW Player not found yet (attempt ${overrideAttempts}/50)`);
-      }
-    };
-    
-    // Try immediately
-    overrideJWPlayerAds();
-    
-    // Wait for JW Player to load with more aggressive checking
-    const checkJWPlayer = setInterval(() => {
-      if (jwPlayerFound) {
-        clearInterval(checkJWPlayer);
-        console.log('✅ JW Player ad blocking activated');
-        return;
-      }
-      
-      overrideJWPlayerAds();
-      
-      if (overrideAttempts >= 50) {
-        clearInterval(checkJWPlayer);
-        console.log('⚠️ JW Player not found after 50 attempts - trying alternative approach...');
-        
-        // Alternative approach: Direct DOM manipulation
-        const alternativeAdBlocker = () => {
-          console.log('🔧 Trying alternative ad blocking approach...');
-          
-          // Remove any existing ad elements
-          const adElements = document.querySelectorAll('.jw-ad-group, .jw-ad-controls, .jw-ad-control, [class*="ad-"], [class*="preroll"]');
-          adElements.forEach(el => {
-            if (el.parentNode) {
-              el.parentNode.removeChild(el);
-              console.log('🚫 Removed ad element:', el.className);
-            }
-          });
-          
-          // Force click any skip buttons
-          const skipButtons = document.querySelectorAll('.jw-skip, [class*="skip"], button[class*="skip"]');
-          skipButtons.forEach(btn => {
-            if (btn.offsetParent) {
-              btn.click();
-              console.log('⏭️ Clicked skip button:', btn.className);
-            }
-          });
-          
-          // Look for video elements and force seek
-          const videos = document.querySelectorAll('video');
-          videos.forEach(video => {
-            if (video.currentTime < 5 && video.duration > 10) {
-              video.currentTime = 5;
-              console.log('⚡ Force seeked video to 5s');
-            }
-          });
-        };
-        
-        // Run alternative approach every 500ms
-        setInterval(alternativeAdBlocker, 500);
-        alternativeAdBlocker(); // Run immediately
-      }
-    }, 200);
-    
-    // Also monitor for script loading
-    const scriptObserver = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        mutation.addedNodes.forEach((node) => {
-          if (node.nodeType === 1 && node.tagName === 'SCRIPT') {
-            const src = node.src || '';
-            if (src.includes('jwplayer') || src.includes('stuff.js')) {
-              console.log('🎬 JW Player script detected:', src);
-              setTimeout(() => {
-                overrideJWPlayerAds();
-              }, 1000);
-            }
-          }
-        });
-      });
-    });
-    
-    scriptObserver.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
-  };
-  
-  // Initialize JW Player Ad Blocker
-  setupJWPlayerAdBlocker();
+  log('🟢 All systems online');
 })();
