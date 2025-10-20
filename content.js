@@ -1,5 +1,5 @@
 // ============================================================
-// 🛡️ ROPHIM ADBLOCK - ULTIMATE FIX V3
+// 🛡️ ROPHIM ADBLOCK - FINAL STABLE VERSION
 // ============================================================
 (() => {
   'use strict';
@@ -13,253 +13,329 @@
   const warn = msg => console.warn(`⚠️ [${isGoat ? 'Goat' : 'RoPhim'}] ${msg}`);
 
   // ============================================================
-  // 🚨 GOATEMBED: INSTANT URL CHECK
+  // 🔥 SERVICE WORKER KILLER - PASSIVE MODE
+  // ============================================================
+  const killServiceWorkers = async () => {
+    if (!navigator.serviceWorker) return;
+    
+    try {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      const hasController = !!navigator.serviceWorker.controller;
+      
+      if (regs.length > 0 || hasController) {
+        warn(`🔥 Killing ${regs.length} SW (controller: ${hasController})`);
+        
+        // Unregister all
+        for (const reg of regs) {
+          await reg.unregister();
+        }
+        
+        log('✅ SW killed');
+      }
+    } catch (e) {
+      warn(`SW kill failed: ${e.message}`);
+    }
+  };
+
+  // Block SW registration
+  if (navigator.serviceWorker) {
+    try {
+      const origRegister = navigator.serviceWorker.register;
+      Object.defineProperty(navigator.serviceWorker, 'register', {
+        value: function(...args) {
+          warn(`🚫 Blocked SW registration: ${args[0]}`);
+          return Promise.reject(new DOMException('Blocked by AdBlock', 'NotSupportedError'));
+        },
+        writable: false,
+        configurable: true
+      });
+      
+      log('🚫 SW registration blocked');
+    } catch (e) {
+      warn(`SW block failed: ${e.message}`);
+    }
+  }
+
+  // Kill existing SWs
+  killServiceWorkers();
+
+  // ============================================================
+  // 🚫 ANTI-DEBUGGER - ENHANCED
+  // ============================================================
+  try {
+    // Block eval with debugger
+    const origEval = window.eval;
+    window.eval = function(code) {
+      if (typeof code === 'string' && /debugger/i.test(code)) {
+        warn('🚫 Blocked debugger in eval');
+        return origEval.call(this, code.replace(/debugger\s*;?/gi, ''));
+      }
+      return origEval.call(this, code);
+    };
+    
+    // Block Function constructor with debugger
+    const OrigFunction = window.Function;
+    window.Function = function(...args) {
+      const code = args[args.length - 1];
+      if (typeof code === 'string' && /debugger/i.test(code)) {
+        warn('🚫 Blocked debugger in Function()');
+        args[args.length - 1] = code.replace(/debugger\s*;?/gi, '');
+      }
+      return OrigFunction.apply(this, args);
+    };
+    window.Function.prototype = OrigFunction.prototype;
+    
+    // Hook Worker to block debugger in workers
+    if (window.Worker) {
+      const OrigWorker = window.Worker;
+      window.Worker = function(scriptURL, ...args) {
+        // Block data: URIs with debugger
+        if (typeof scriptURL === 'string' && scriptURL.startsWith('data:')) {
+          warn('🚫 Blocked data: URI Worker');
+          throw new DOMException('Blocked by AdBlock', 'SecurityError');
+        }
+        return new OrigWorker(scriptURL, ...args);
+      };
+      window.Worker.prototype = OrigWorker.prototype;
+    }
+    
+    // Override Object.defineProperty to catch debugger setters
+    const origDefProp = Object.defineProperty;
+    Object.defineProperty = function(obj, prop, desc) {
+      if (desc && typeof desc.get === 'function') {
+        const getStr = desc.get.toString();
+        if (/debugger/i.test(getStr)) {
+          warn('🚫 Blocked debugger in getter');
+          desc.get = function() { return undefined; };
+        }
+      }
+      if (desc && typeof desc.set === 'function') {
+        const setStr = desc.set.toString();
+        if (/debugger/i.test(setStr)) {
+          warn('🚫 Blocked debugger in setter');
+          desc.set = function() {};
+        }
+      }
+      return origDefProp.call(this, obj, prop, desc);
+    };
+    
+    log('🚫 Anti-debugger active');
+  } catch (e) {
+    warn(`Anti-debugger failed: ${e.message}`);
+  }
+
+  // ============================================================
+  // 🚫 NETWORK BLOCKER - ENHANCED
+  // ============================================================
+  const BLOCKED = [
+    /crash2\.html/i,
+    /error\.html/i,
+    /ping\.gif/i,
+    /report_issue/i,
+    /man88/i,
+    /lu88/i,
+    /sspp/i,
+    /\.ads\./i,
+    /adserver/i,
+    /preroll/i,
+    /ad-overlay/i,
+    /ima-ad/i,
+    /jwpsrv\.js/i,
+    /denied/i,
+    /jwpltx\.com/i,  // Block JW Platform tracking
+    /prd\.jwpltx/i,   // Block production tracking
+    /data:application\/javascript.*debugger/i  // Block data URIs with debugger
+  ];
+
+  const ALLOWED = [
+    /jwplayer\.js/i,
+    /provider\.hlsjs\.js/i,
+    /\.m3u8/i,
+    /\.ts$/i,
+    /\.mp4/i,
+    /\.webp$/i,
+    /\.woff2?$/i
+  ];
+
+  const shouldBlock = (url) => {
+    const s = String(url);
+    
+    // Block data: URIs with specific patterns
+    if (s.startsWith('data:')) {
+      if (/debugger|crash2|error/i.test(s)) {
+        warn('🚫 Blocked malicious data: URI');
+        return true;
+      }
+    }
+    
+    if (ALLOWED.some(p => p.test(s))) return false;
+    return BLOCKED.some(p => p.test(s));
+  };
+
+  // Fetch hook
+  const origFetch = window.fetch;
+  window.fetch = function(url, ...args) {
+    if (shouldBlock(url)) {
+      warn(`🚫 Fetch blocked: ${String(url).slice(0, 50)}`);
+      return Promise.resolve(new Response('', {status: 204}));
+    }
+    return origFetch.call(this, url, ...args);
+  };
+
+  // XHR hook
+  const origOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(m, url, ...args) {
+    if (shouldBlock(url)) {
+      this._blocked = true;
+      warn(`🚫 XHR blocked: ${String(url).slice(0, 50)}`);
+      return;
+    }
+    return origOpen.call(this, m, url, ...args);
+  };
+
+  const origSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.send = function(...args) {
+    if (this._blocked) return;
+    return origSend.call(this, ...args);
+  };
+
+  // Block script injection with data: URIs
+  const origCreateElement = document.createElement;
+  document.createElement = function(tag, ...args) {
+    const el = origCreateElement.call(this, tag, ...args);
+    
+    if (tag.toLowerCase() === 'script') {
+      const srcDesc = Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype, 'src');
+      
+      Object.defineProperty(el, 'src', {
+        get: srcDesc.get,
+        set(url) {
+          if (shouldBlock(url)) {
+            warn(`🚫 Script blocked: ${String(url).slice(0, 50)}`);
+            return;
+          }
+          return srcDesc.set.call(this, url);
+        }
+      });
+    }
+    
+    return el;
+  };
+
+  log('🚫 Network blocker active');
+
+  // ============================================================
+  // 🎯 GOATEMBED: URL PROTECTION
   // ============================================================
   if (isGoat) {
     const currentUrl = location.href;
-    // More precise bad URL detection - exclude player resource URLs
-    const isBadUrl = /crash2\.html|error\.html|resource\/crash|resource\/error/i.test(currentUrl) || 
-                     (/\.jpg$/i.test(currentUrl) && !/\/player\/|\/v1\/|\/resource\/embed/i.test(currentUrl));
+    const isBad = /crash2\.html|error\.html/i.test(currentUrl) || 
+                  (/\.jpg$/i.test(currentUrl) && !/\/player\//i.test(currentUrl));
     
-    // Extract video ID from current URL if possible
-    const getVideoId = (url) => {
-      const match = url.match(/goatembed\.com\/([A-Za-z0-9_-]{8,})/);
-      return match && match[1] !== 'resource' ? match[1] : null;
-    };
-    
-    const currentVideoId = getVideoId(currentUrl);
-    
-    if (isBadUrl) {
-      warn(`🔴 BAD URL detected: ${currentUrl}`);
-      
-      // Stop page loading
+    if (isBad) {
+      warn(`🔴 Bad URL: ${currentUrl}`);
       window.stop();
       
-      // Try to get video ID from various sources
-      let videoId = null;
+      // Get video ID
+      let vid = null;
       
-      // 1. From session storage (set by parent)
-      try {
-        videoId = sessionStorage.getItem('rophim_video_id');
-        if (videoId) log(`📦 Got video ID from storage: ${videoId}`);
-      } catch (e) {}
-      
-      // 2. From URL parameters
-      if (!videoId) {
-        const params = new URLSearchParams(location.search);
-        videoId = params.get('id') || params.get('v');
-        if (videoId) log(`🔗 Got video ID from params: ${videoId}`);
-      }
-      
-      // 3. From document.referrer
-      if (!videoId && document.referrer) {
-        videoId = getVideoId(document.referrer);
-        if (videoId) log(`↩️ Got video ID from referrer: ${videoId}`);
-      }
-      
-      // 4. From current URL (if it has one before crash2)
-      if (!videoId) {
-        videoId = currentVideoId;
-        if (videoId) log(`🎯 Got video ID from current URL: ${videoId}`);
-      }
-      
-      // If we have video ID, redirect
-      if (videoId) {
-        const correctUrl = `https://goatembed.com/${videoId}?version=1`;
-        
-        // Prevent infinite loop
-        const redirectKey = 'rophim_redirect_attempt';
-        const attempts = parseInt(sessionStorage.getItem(redirectKey) || '0');
-        
-        if (attempts >= 3) {
-          warn('🛑 Too many redirect attempts - showing error');
-        } else {
-          sessionStorage.setItem(redirectKey, String(attempts + 1));
-          log(`🔄 REDIRECT (attempt ${attempts + 1}): ${correctUrl}`);
-          
-          // Use replace to avoid history
-          location.replace(correctUrl);
-          
-          // Block everything
-          throw new Error('Redirecting...');
+      if (document.referrer) {
+        const m = document.referrer.match(/goatembed\.com\/([A-Za-z0-9_-]{8,})/);
+        if (m && m[1] !== 'resource' && m[1] !== 'e') {
+          vid = m[1];
         }
       }
       
-      // Can't fix - show error page
-      warn('🛑 Cannot determine video ID - showing error');
-      showErrorPage(currentUrl);
-      throw new Error('Bad URL blocked');
+      if (!vid) {
+        try {
+          vid = sessionStorage.getItem('goat_vid');
+        } catch (e) {}
+      }
+      
+      if (vid) {
+        const fix = `https://goatembed.com/${vid}?version=1`;
+        const count = parseInt(sessionStorage.getItem('goat_redir') || '0');
+        
+        if (count < 1) {
+          sessionStorage.setItem('goat_redir', '1');
+          log(`🔄 Redirecting to: ${fix}`);
+          setTimeout(() => location.replace(fix), 100);
+          throw new Error('Redirecting');
+        }
+      }
+      
+      // Show error
+      document.open();
+      document.write(`
+        <!DOCTYPE html>
+        <html><head><meta charset="utf-8"><title>Blocked</title><style>
+        *{margin:0;padding:0}body{background:#1e293b;color:#fff;font:16px/1.6 system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+        .box{background:#334155;padding:40px;border-radius:16px;text-align:center;max-width:500px}.icon{font-size:60px;margin-bottom:20px}
+        h1{font-size:24px;margin-bottom:12px}p{opacity:.9;margin-bottom:8px}.url{background:#1e293b;padding:12px;border-radius:8px;font:12px monospace;word-break:break-all;margin:16px 0}
+        button{background:#3b82f6;color:#fff;border:0;padding:12px 24px;border-radius:8px;font:600 14px system-ui;cursor:pointer;margin:8px 4px}
+        button:hover{background:#2563eb}
+        </style></head><body><div class="box"><div class="icon">🚫</div><h1>URL Blocked</h1>
+        <p>RoPhim AdBlock has blocked this page.</p>
+        <div class="url">${currentUrl.replace(/</g, '&lt;').slice(0, 100)}</div>
+        <button onclick="history.back()">← Back</button>
+        ${vid ? `<button onclick="location='https://goatembed.com/${vid}?version=1'">🔄 Reload</button>` : ''}
+        </div></body></html>
+      `);
+      document.close();
+      throw new Error('Blocked');
     }
     
-    // URL is clean - clear redirect counter
-    try {
-      sessionStorage.removeItem('rophim_redirect_attempt');
-      sessionStorage.setItem('rophim_video_id', currentVideoId || '');
-    } catch (e) {}
+    // Clean state
+    sessionStorage.removeItem('goat_redir');
     
-    log(`✅ URL is clean: ${currentUrl}`);
+    // Store ID
+    const m = currentUrl.match(/goatembed\.com\/([A-Za-z0-9_-]{8,})/);
+    if (m && m[1] !== 'resource' && m[1] !== 'e') {
+      try {
+        sessionStorage.setItem('goat_vid', m[1]);
+      } catch (e) {}
+    }
+    
+    log(`✅ URL OK: ${currentUrl.slice(0, 60)}`);
   }
 
   // ============================================================
-  // 🖼️ ERROR PAGE
-  // ============================================================
-  function showErrorPage(blockedUrl) {
-    document.open();
-    document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <title>Blocked by RoPhim AdBlock</title>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body {
-            background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
-            color: #fff;
-            font-family: -apple-system, system-ui, sans-serif;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            padding: 20px;
-          }
-          .container {
-            text-align: center;
-            max-width: 600px;
-            background: rgba(0,0,0,0.3);
-            padding: 40px;
-            border-radius: 16px;
-            backdrop-filter: blur(10px);
-          }
-          .icon {
-            font-size: 80px;
-            margin-bottom: 20px;
-            animation: shake 0.5s infinite;
-          }
-          @keyframes shake {
-            0%, 100% { transform: rotate(-5deg); }
-            50% { transform: rotate(5deg); }
-          }
-          h1 {
-            font-size: 32px;
-            margin-bottom: 16px;
-            font-weight: 700;
-          }
-          p {
-            font-size: 16px;
-            opacity: 0.9;
-            line-height: 1.6;
-            margin-bottom: 12px;
-          }
-          .url {
-            background: rgba(0,0,0,0.4);
-            padding: 12px;
-            border-radius: 8px;
-            word-break: break-all;
-            font-size: 12px;
-            font-family: 'Courier New', monospace;
-            margin: 20px 0;
-            border-left: 4px solid #ef4444;
-          }
-          button {
-            background: #fff;
-            color: #dc2626;
-            border: none;
-            padding: 12px 32px;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            margin-top: 20px;
-            transition: all 0.2s;
-          }
-          button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(255,255,255,0.3);
-          }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="icon">🚫</div>
-          <h1>Invalid URL Blocked</h1>
-          <p>This page attempted to load an advertising or error page.</p>
-          <p><strong>RoPhim AdBlock</strong> has blocked it to protect your experience.</p>
-          <div class="url">${blockedUrl.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-          <button onclick="window.parent.postMessage({type:'rophim_reload'}, '*')">🔄 Reload Video</button>
-          <button onclick="window.history.back()" style="margin-left: 10px;">← Go Back</button>
-        </div>
-      </body>
-      </html>
-    `);
-    document.close();
-  }
-
-  // ============================================================
-  // 🔒 REDIRECT PROTECTION (Goatembed)
+  // 🔒 REDIRECT PROTECTION
   // ============================================================
   if (isGoat) {
-    const originalUrl = location.href;
     let blockCount = 0;
     
-    const blockRedirect = (method, url) => {
-      // Don't block player resource URLs
-      if (/\/player\/|\/v1\/|\/resource\/embed|U10BA1JTB1NXAVABU1JTVVcAA1dQBIED/i.test(url)) {
-        return null; // Allow
+    // Hook via descriptor
+    try {
+      const LocationProto = Object.getPrototypeOf(location);
+      
+      // Hook href
+      const hrefDesc = Object.getOwnPropertyDescriptor(LocationProto, 'href');
+      if (hrefDesc && hrefDesc.set) {
+        Object.defineProperty(location, 'href', {
+          get: hrefDesc.get,
+          set(url) {
+            if (shouldBlock(url)) {
+              blockCount++;
+              warn(`🚫 href blocked (${blockCount}): ${String(url).slice(0, 50)}`);
+              return;
+            }
+            return hrefDesc.set.call(location, url);
+          },
+          configurable: true
+        });
       }
-      blockCount++;
-      warn(`🚫 BLOCKED ${method}(${blockCount}): ${url.substring(0, 80)}`);
-      return false;
-    };
+      
+      log('🔒 Redirect protection active');
+    } catch (e) {
+      warn(`Redirect hook failed: ${e.message}`);
+    }
     
-    // Hook all redirect methods
-    const origReplace = location.replace.bind(location);
-    location.replace = function(url) {
-      const urlStr = String(url);
-      // Allow player resources
-      if (/\/player\/|\/v1\/|\/resource\/embed|U10BA1JTB1NXAVABU1JTVVcAA1dQBIED/i.test(urlStr)) {
-        return origReplace(urlStr);
-      }
-      if (/crash2|error|resource\/(?!embed)|\.jpg$/i.test(urlStr)) {
-        return blockRedirect('replace', urlStr);
-      }
-      return origReplace(urlStr);
-    };
-    
-    const origAssign = location.assign.bind(location);
-    location.assign = function(url) {
-      const urlStr = String(url);
-      if (/crash2|error|resource\/(?!embed)|\.jpg$/i.test(urlStr)) {
-        return blockRedirect('assign', urlStr);
-      }
-      return origAssign(urlStr);
-    };
-    
-    const hrefDesc = Object.getOwnPropertyDescriptor(Location.prototype, 'href');
-    Object.defineProperty(location, 'href', {
-      get: hrefDesc.get,
-      set(url) {
-        const urlStr = String(url);
-        if (/crash2|error|resource\/(?!embed)|\.jpg$/i.test(urlStr)) {
-          blockRedirect('href', urlStr);
-          return;
-        }
-        return hrefDesc.set.call(this, urlStr);
-      }
-    });
-    
-    log('🔒 Redirect protection active');
-    
-    // Report status to parent
+    // Report
     setTimeout(() => {
-      log(`✅ Protected - blocked ${blockCount} redirects`);
-      try {
-        window.parent.postMessage({
-          type: 'rophim_status',
-          blocked: blockCount,
-          url: location.href
-        }, '*');
-      } catch (e) {}
+      if (blockCount > 0) {
+        log(`✅ Blocked ${blockCount} redirects`);
+      }
     }, 5000);
   }
 
@@ -267,71 +343,43 @@
   // 🎯 ROPHIM: IFRAME MANAGER
   // ============================================================
   if (isRophim) {
-    // Listen for messages from iframe
-    window.addEventListener('message', (e) => {
-      if (e.data.type === 'rophim_reload') {
-        log('🔄 Reload requested from iframe');
-        location.reload();
-      }
-      
-      if (e.data.type === 'rophim_status') {
-        log(`📊 Iframe status: blocked ${e.data.blocked} redirects`);
-      }
-    });
-    
-    // Store video ID for iframe
     const match = location.pathname.match(/([A-Za-z0-9_-]{8,})/);
     if (match) {
       try {
-        sessionStorage.setItem('rophim_video_id', match[0]);
+        sessionStorage.setItem('rophim_vid', match[0]);
         log(`💾 Stored video ID: ${match[0]}`);
       } catch (e) {}
     }
     
-    // Get correct iframe URL
     const getCorrectUrl = () => {
       if (!match) return null;
-      const params = new URLSearchParams(location.search);
-      return `https://goatembed.com/${match[0]}?version=${params.get('ver')||1}&season=${params.get('s')||1}&episode=${params.get('ep')||1}`;
+      const p = new URLSearchParams(location.search);
+      return `https://goatembed.com/${match[0]}?version=${p.get('ver')||2}&season=${p.get('s')||1}&episode=${p.get('ep')||1}`;
     };
     
-    // Hook iframe creation
+    // Hook createElement
     const origCreate = document.createElement;
     document.createElement = function(tag, ...args) {
       const el = origCreate.call(this, tag, ...args);
       
       if (tag.toLowerCase() === 'iframe') {
-        log('🎬 Iframe created - installing protections');
-        
         const srcDesc = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src');
         
         Object.defineProperty(el, 'src', {
           get: srcDesc.get,
           set(url) {
-            const urlStr = String(url);
+            const s = String(url);
             
-            // Block bad URLs
-            if (/crash2|error|resource\/(?!embed)|\.jpg$/i.test(urlStr)) {
-              const correct = getCorrectUrl();
-              if (correct) {
-                warn(`🛡️ Blocked iframe hijack: ${urlStr.substring(0, 60)}`);
-                log(`✅ Redirected to: ${correct}`);
-                return srcDesc.set.call(this, correct);
+            if (shouldBlock(s)) {
+              const fix = getCorrectUrl();
+              if (fix) {
+                warn(`🛡️ Iframe blocked: ${s.slice(0, 50)}`);
+                return srcDesc.set.call(this, fix);
               }
+              return;
             }
             
-            // Fix wrong video ID
-            if (/goatembed\.com/i.test(urlStr) && match) {
-              if (!urlStr.includes(match[0])) {
-                const correct = getCorrectUrl();
-                if (correct) {
-                  warn(`🔧 Fixed wrong video ID in iframe`);
-                  return srcDesc.set.call(this, correct);
-                }
-              }
-            }
-            
-            return srcDesc.set.call(this, urlStr);
+            return srcDesc.set.call(this, s);
           }
         });
       }
@@ -343,66 +391,123 @@
   }
 
   // ============================================================
-  // 🔥 JW PLAYER HOOK
+  // 🔥 JW PLAYER HOOK - ENHANCED AD BLOCKING
   // ============================================================
   let jwOrig = null;
-  let hooked = false;
+  let adSkipCount = 0;
   
   Object.defineProperty(window, 'jwplayer', {
     get: () => jwOrig,
     set(val) {
-      if (!val || hooked) return;
-      hooked = true;
+      if (!val || jwOrig) return;
       
       log('🎬 JW Player detected');
       
       jwOrig = function(id) {
-        const player = val(id);
-        if (!player) return player;
+        const p = val(id);
+        if (!p) return p;
         
-        const origSetup = player.setup;
-        player.setup = function(cfg) {
+        const origSetup = p.setup;
+        p.setup = function(cfg) {
           log('⚙️ Player setup intercepted');
           
           if (cfg) {
-            // Remove ads
+            // Remove all advertising
             delete cfg.advertising;
+            delete cfg.preload;
+            cfg.autostart = true;
+            
             if (cfg.playlist) {
-              cfg.playlist = cfg.playlist.map(item => {
-                delete item.adschedule;
-                delete item.advertising;
-                return item;
+              cfg.playlist = cfg.playlist.map(i => {
+                delete i.adschedule;
+                delete i.advertising;
+                return i;
               });
             }
-            cfg.autostart = true;
-            log('✅ Cleaned config');
+            
+            log('✅ Config cleaned');
           }
           
-          const result = origSetup.call(this, cfg);
+          const res = origSetup.call(this, cfg);
           
-          // Override ad methods
-          this.playAd = () => { log('🚫 playAd blocked'); this.play(); return this; };
-          this.pauseAd = () => { log('🚫 pauseAd blocked'); return this; };
-          this.skipAd = () => { log('⏭️ skipAd called'); this.play(); return this; };
-          
-          // Auto-skip
-          const skip = () => {
-            setTimeout(() => {
-              try { this.skipAd(); this.play(); } catch(e) {}
-            }, 50);
+          // AGGRESSIVE ad blocking
+          this.playAd = function() {
+            adSkipCount++;
+            warn(`🚫 playAd() blocked (${adSkipCount})`);
+            this.play();
+            return this;
           };
           
-          this.on('adStarted', skip);
-          this.on('adBreakStart', skip);
-          this.on('adImpression', skip);
-          this.on('adError', () => { log('❌ Ad error'); skip(); });
+          this.pauseAd = function() {
+            warn('🚫 pauseAd() blocked');
+            return this;
+          };
           
+          this.skipAd = function() {
+            warn('⏭️ skipAd() called');
+            this.play();
+            return this;
+          };
+          
+          // Force skip on any ad event
+          const forceSkip = () => {
+            setTimeout(() => {
+              try {
+                adSkipCount++;
+                warn(`⏭️ Force skip ad (${adSkipCount})`);
+                
+                // Multiple skip attempts
+                this.skipAd();
+                this.play();
+                
+                // Try to seek past ad if it has duration
+                const pos = this.getPosition();
+                if (pos < 5) {
+                  this.seek(5);
+                }
+                
+                // Set volume to 0 during ad
+                const origVol = this.getVolume();
+                this.setVolume(0);
+                setTimeout(() => this.setVolume(origVol), 100);
+              } catch(e) {
+                warn(`Skip failed: ${e.message}`);
+              }
+            }, 10);
+          };
+          
+          // Hook ALL ad events
+          this.on('adStarted', forceSkip);
+          this.on('adBreakStart', forceSkip);
+          this.on('adImpression', forceSkip);
+          this.on('adPlay', forceSkip);
+          this.on('adRequest', forceSkip);
+          this.on('adSchedule', forceSkip);
+          this.on('adError', (e) => {
+            warn('❌ Ad error - forcing skip');
+            forceSkip();
+          });
+          
+          // Log useful events
           this.on('ready', () => log('✅ Player ready'));
+          this.on('play', () => log('▶️ Playing'));
+          this.on('complete', () => log('✅ Playback complete'));
           
-          return result;
+          // Monitor for hidden ads
+          this.on('time', (e) => {
+            // If player is "playing" but paused, force play
+            const state = this.getState();
+            if (state === 'paused' && e.position > 0) {
+              setTimeout(() => this.play(), 50);
+            }
+          });
+          
+          log('✅ Player hooks installed');
+          
+          return res;
         };
         
-        return player;
+        return p;
       };
       
       Object.keys(val).forEach(k => {
@@ -411,92 +516,75 @@
       
       if (val.prototype) jwOrig.prototype = val.prototype;
       
-      log('✅ JW Player hooked');
+      log('✅ JW Player fully hooked');
     },
     configurable: true
   });
 
   // ============================================================
-  // 🧹 CONTENT PROTECTION (RoPhim)
+  // 🎨 CSS INJECTION
+  // ============================================================
+  const css = document.createElement('style');
+  css.textContent = `
+    [class*="man88"],[class*="lu88"],[class*="sspp"],
+    .denied-box,.ad-overlay,.ima-ad-container,.app-box-fix,
+    [class*="preroll"],[class*="ads"]:not(.watch-player),
+    .jw-ad,.jw-ad-container{
+      display:none!important;
+      opacity:0!important;
+      pointer-events:none!important;
+      visibility:hidden!important;
+    }
+    .watch-player,video,#embed-player,.jwplayer{
+      display:block!important;
+      visibility:visible!important;
+      opacity:1!important;
+    }
+  `;
+  (document.head || document.documentElement).appendChild(css);
+  log('🎨 CSS injected');
+
+  // ============================================================
+  // 🧹 DOM CLEANER
   // ============================================================
   if (isRophim) {
-    // Kill Service Workers
-    (async () => {
-      if (!navigator.serviceWorker) return;
-      
-      const regs = await navigator.serviceWorker.getRegistrations();
-      if (regs.length > 0) {
-        warn(`🔥 Killing ${regs.length} service workers`);
-        await Promise.all(regs.map(r => r.unregister()));
-        log('✅ Service workers killed');
-      }
-      
-      // Block new registrations
-      const orig = navigator.serviceWorker.register;
-      navigator.serviceWorker.register = () => {
-        warn('🚫 Service Worker registration blocked');
-        return Promise.reject(new Error('Blocked by AdBlock'));
-      };
-    })();
+    const selectors = [
+      '[class*="man88"]','[class*="lu88"]','[class*="sspp"]',
+      '.denied-box','.ad-overlay','.ima-ad-container','.app-box-fix',
+      '[class*="preroll"]','[class*="ads"]:not(.watch-player)',
+      '.jw-ad','.jw-ad-container'
+    ];
 
-    // Network blocker - UPDATED to allow player resources
-    const BAD = /crash2|error|man88|lu88|report_issue|\.ads\.|adserver|catfish|sspp|preroll|ad-overlay|ima-ad/i;
-    const ALLOW = /\/player\/|\/v1\/|\/resource\/embed|goatembed\.com\/v1\/player/i;
-    
-    const origFetch = window.fetch;
-    window.fetch = function(url, ...args) {
-      const urlStr = String(url);
-      if (BAD.test(urlStr) && !ALLOW.test(urlStr)) {
-        log(`🚫 Blocked fetch: ${urlStr.substring(0, 50)}`);
-        return Promise.resolve(new Response('', {status: 204}));
-      }
-      return origFetch.call(this, url, ...args);
-    };
-    
-    const origOpen = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function(m, url, ...args) {
-      if (BAD.test(url)) {
-        this._blocked = true;
-        log(`🚫 Blocked XHR: ${url.substring(0, 50)}`);
-        return;
-      }
-      return origOpen.call(this, m, url, ...args);
-    };
-    
-    const origSend = XMLHttpRequest.prototype.send;
-    XMLHttpRequest.prototype.send = function(...args) {
-      if (this._blocked) return;
-      return origSend.call(this, ...args);
-    };
-
-    // CSS injection
-    const style = document.createElement('style');
-    style.textContent = `
-      [class*="man88"], [class*="lu88"], [class*="sspp"],
-      .denied-box, .ad-overlay, .ima-ad-container,
-      [class*="preroll"], [class*="ads"]:not(.watch-player),
-      .jw-ad, .jw-ad-container { display: none !important; }
-    `;
-    (document.head || document.documentElement).appendChild(style);
-
-    // Popup blocker
-    window.open = () => { log('🚫 Blocked popup'); return null; };
-
-    // DOM cleaner
+    let count = 0;
     const clean = () => {
-      const sel = '[class*="man88"],[class*="lu88"],[class*="sspp"],.denied-box,.ad-overlay';
-      document.querySelectorAll(sel).forEach(el => {
-        if (!el.closest('video,#embed-player,.jwplayer')) el.remove();
+      document.querySelectorAll(selectors.join(',')).forEach(el => {
+        if (!el.closest('video,#embed-player,.jwplayer,.watch-player')) {
+          el.remove();
+          count++;
+        }
       });
     };
 
     setInterval(clean, 2000);
     
     const obs = new MutationObserver(clean);
-    obs.observe(document.documentElement, { childList: true, subtree: true });
-
-    log('✅ Content protection active');
+    obs.observe(document.documentElement, {childList: true, subtree: true});
+    
+    setTimeout(() => {
+      if (count > 0) log(`🧹 Cleaned ${count} ads`);
+    }, 5000);
   }
 
-  log('🟢 All systems online');
+  // ============================================================
+  // 🚫 POPUP BLOCKER
+  // ============================================================
+  window.open = () => {
+    warn('🚫 Popup blocked');
+    return null;
+  };
+
+  // ============================================================
+  // ✅ INIT COMPLETE
+  // ============================================================
+  log('🟢 AdBlock active');
 })();
