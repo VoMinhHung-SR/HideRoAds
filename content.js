@@ -6,11 +6,33 @@
 
   const isGoat = /goatembed\./i.test(location.hostname);
   const isRophim = /rophim\./i.test(location.hostname);
+  const currentDomain = location.hostname;
   
   if (!isGoat && !isRophim) return;
 
   const log = msg => console.log(`✅ [${isGoat ? 'Goat' : 'RoPhim'}] ${msg}`);
   const warn = msg => console.warn(`⚠️ [${isGoat ? 'Goat' : 'RoPhim'}] ${msg}`);
+
+  // Enhanced blocking patterns for ad domains
+  const AD_DOMAINS = [
+    /robong\./i,
+    /man88\./i,
+    /lu88\./i,
+    /sspp\./i,
+    /catfish\./i,
+    /\.ads\./i,
+    /adserver/i,
+    /affiliate/i,
+    /promo/i,
+    /bet/i,
+    /casino/i,
+    /gambling/i
+  ];
+  
+  const isAdDomain = (url) => {
+    const s = String(url);
+    return AD_DOMAINS.some(pattern => pattern.test(s));
+  };
 
   // ============================================================
   // 🔥 SERVICE WORKER KILLER - PASSIVE MODE
@@ -302,7 +324,7 @@
   // ============================================================
   // 🔒 REDIRECT PROTECTION
   // ============================================================
-  if (isGoat) {
+  if (isGoat || isRophim) {
     let blockCount = 0;
     
     // Hook via descriptor
@@ -315,7 +337,7 @@
         Object.defineProperty(location, 'href', {
           get: hrefDesc.get,
           set(url) {
-            if (shouldBlock(url)) {
+            if (shouldBlock(url) || isAdDomain(url)) {
               blockCount++;
               warn(`🚫 href blocked (${blockCount}): ${String(url).slice(0, 50)}`);
               return;
@@ -522,14 +544,20 @@
   });
 
   // ============================================================
-  // 🎨 CSS INJECTION
+  // 🎨 CSS INJECTION - ENHANCED
   // ============================================================
   const css = document.createElement('style');
   css.textContent = `
     [class*="man88"],[class*="lu88"],[class*="sspp"],
     .denied-box,.ad-overlay,.ima-ad-container,.app-box-fix,
     [class*="preroll"],[class*="ads"]:not(.watch-player),
-    .jw-ad,.jw-ad-container{
+    .jw-ad,.jw-ad-container,
+    .modal-backdrop,.fade.modal-backdrop,.modal-backdrop.show,
+    .fade.modal-backdrop.show,div.fade.modal-backdrop.show,
+    #shadow-root,[id*="shadow"],[class*="backdrop"],
+    [class*="overlay"]:not(.watch-player):not(video),
+    div[style*="position: fixed"][style*="z-index"],
+    div[style*="position: absolute"][style*="z-index: 9999"]{
       display:none!important;
       opacity:0!important;
       pointer-events:none!important;
@@ -545,14 +573,18 @@
   log('🎨 CSS injected');
 
   // ============================================================
-  // 🧹 DOM CLEANER
+  // 🧹 DOM CLEANER - ENHANCED
   // ============================================================
   if (isRophim) {
     const selectors = [
       '[class*="man88"]','[class*="lu88"]','[class*="sspp"]',
       '.denied-box','.ad-overlay','.ima-ad-container','.app-box-fix',
       '[class*="preroll"]','[class*="ads"]:not(.watch-player)',
-      '.jw-ad','.jw-ad-container'
+      '.jw-ad','.jw-ad-container',
+      '.modal-backdrop','.fade.modal-backdrop','.modal-backdrop.show',
+      'div.fade.modal-backdrop.show',
+      '[id*="shadow-root"]','#shadow-root',
+      '[class*="backdrop"]','[class*="overlay"]:not(.watch-player)'
     ];
 
     let count = 0;
@@ -565,14 +597,68 @@
       });
     };
 
-    setInterval(clean, 2000);
+    // Initial clean
+    clean();
     
-    const obs = new MutationObserver(clean);
+    // Clean every 500ms (more frequent for modals)
+    setInterval(clean, 500);
+    
+    // Observer for new elements
+    const obs = new MutationObserver(() => {
+      clean();
+    });
     obs.observe(document.documentElement, {childList: true, subtree: true});
     
     setTimeout(() => {
       if (count > 0) log(`🧹 Cleaned ${count} ads`);
     }, 5000);
+  }
+
+  // ============================================================
+  // 🍪 COOKIE TRICK - FORCE DISABLE POPUPS
+  // ============================================================
+  if (isRophim) {
+    // Set cookies to disable popups permanently
+    const disablePopups = () => {
+      try {
+        // Set _popunder_opened_v0.1 to disable popup
+        document.cookie = '_popunder_opened_v0.1=1; path=/; max-age=31536000'; // 1 year
+        document.cookie = `_popunder_opened_v0.1=1; path=/; domain=.${currentDomain}; max-age=31536000`;
+        
+        // Set _n_rb_show to disable robong show
+        document.cookie = '_n_rb_show=1; path=/; max-age=31536000';
+        document.cookie = `_n_rb_show=1; path=/; domain=.${currentDomain}; max-age=31536000`;
+        
+        // Set _allow_popunder to 0 to disable
+        document.cookie = '_allow_popunder=0; path=/; max-age=31536000';
+        document.cookie = `_allow_popunder=0; path=/; domain=.${currentDomain}; max-age=31536000`;
+        
+        // Additional popup blocking cookies
+        document.cookie = '_popup_blocked=1; path=/; max-age=31536000';
+        document.cookie = '_ad_blocked=1; path=/; max-age=31536000';
+        
+        log('🍪 Popup cookies set to disable');
+      } catch (e) {
+        warn(`Cookie trick failed: ${e.message}`);
+      }
+    };
+    
+    // Set immediately
+    disablePopups();
+    
+    // Set again after 1 second to ensure it sticks
+    setTimeout(disablePopups, 1000);
+    
+    // Monitor and re-set if needed
+    setInterval(() => {
+      const hasPopupCookie = document.cookie.includes('_popunder_opened_v0.1=1');
+      if (!hasPopupCookie) {
+        disablePopups();
+        log('🔄 Re-applied popup disable cookies');
+      }
+    }, 5000);
+    
+    log('🍪 Cookie trick active');
   }
 
   // ============================================================
