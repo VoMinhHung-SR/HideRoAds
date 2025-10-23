@@ -1,5 +1,5 @@
 // ============================================================
-// 🛡️ ROPHIM ADBLOCK - OPTIMIZED FINAL VERSION
+// 🛡️ ROPHIM ADBLOCK - FIXED VERSION
 // ============================================================
 (() => {
   'use strict';
@@ -13,11 +13,11 @@
   const warn = msg => console.warn(`⚠️ [${isGoat ? 'Goat' : 'RoPhim'}] ${msg}`);
 
   // ============================================================
-  // 🍪 COOKIE PROTECTION - FIRST PRIORITY
+  // 🍪 COOKIE PROTECTION
   // ============================================================
   const COOKIE_CONFIG = {
     path: '/',
-    maxAge: 31536000, // 1 year
+    maxAge: 31536000,
     sameSite: 'Lax'
   };
 
@@ -48,80 +48,155 @@
     });
   };
 
-  // Apply immediately
   protectCookies();
-
-  // Monitor and re-apply every 2 seconds
   setInterval(protectCookies, 2000);
-
   log('🍪 Cookie protection active');
 
   // ============================================================
-  // 🔥 SERVICE WORKER KILLER
+  // 🔥 SERVICE WORKER KILLER - AGGRESSIVE MODE
   // ============================================================
   const killServiceWorkers = async () => {
     if (!navigator.serviceWorker) return;
     
     try {
       const regs = await navigator.serviceWorker.getRegistrations();
-      if (regs.length > 0) {
-        await Promise.all(regs.map(reg => reg.unregister()));
-        log('✅ SW killed');
+      for (const reg of regs) {
+        await reg.unregister();
+        warn(`✅ SW killed: ${reg.scope}`);
+      }
+      
+      // Force reload controller
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage('KILL');
       }
     } catch (e) {
       warn(`SW kill failed: ${e.message}`);
     }
   };
 
-  // Block SW registration
+  // Block SW registration BEFORE anything else
   if (navigator.serviceWorker) {
-    try {
-      Object.defineProperty(navigator.serviceWorker, 'register', {
-        value: () => Promise.reject(new DOMException('Blocked', 'NotSupportedError')),
-        writable: false,
-        configurable: true
-      });
-      log('🚫 SW blocked');
-    } catch (e) {}
+    const origRegister = navigator.serviceWorker.register;
+    const origGetReg = navigator.serviceWorker.getRegistration;
+    const origGetRegs = navigator.serviceWorker.getRegistrations;
+    
+    Object.defineProperty(navigator.serviceWorker, 'register', {
+      value: function(...args) {
+        warn(`🚫 SW registration blocked: ${args[0]}`);
+        return Promise.reject(new DOMException('Service Worker blocked', 'SecurityError'));
+      },
+      writable: false,
+      configurable: false
+    });
+    
+    Object.defineProperty(navigator.serviceWorker, 'getRegistration', {
+      value: async function() {
+        await killServiceWorkers();
+        return undefined;
+      },
+      writable: false,
+      configurable: false
+    });
+    
+    Object.defineProperty(navigator.serviceWorker, 'getRegistrations', {
+      value: async function() {
+        await killServiceWorkers();
+        return [];
+      },
+      writable: false,
+      configurable: false
+    });
+    
+    log('🚫 SW registration blocked');
   }
 
+  // Aggressive SW killing
   killServiceWorkers();
+  setInterval(killServiceWorkers, 1000);
 
   // ============================================================
-  // 🚫 ANTI-DEBUGGER
+  // 🚫 ANTI-DEBUGGER - ENHANCED
   // ============================================================
-  try {
-    const origEval = window.eval;
-    window.eval = function(code) {
-      if (typeof code === 'string' && /debugger/i.test(code)) {
-        return origEval.call(this, code.replace(/debugger\s*;?/gi, ''));
-      }
-      return origEval.call(this, code);
-    };
-
-    const OrigFunction = window.Function;
-    window.Function = function(...args) {
-      const code = args[args.length - 1];
-      if (typeof code === 'string' && /debugger/i.test(code)) {
-        args[args.length - 1] = code.replace(/debugger\s*;?/gi, '');
-      }
-      return OrigFunction.apply(this, args);
-    };
-    window.Function.prototype = OrigFunction.prototype;
-
-    if (window.Worker) {
-      const OrigWorker = window.Worker;
-      window.Worker = function(url, ...args) {
-        if (typeof url === 'string' && url.startsWith('data:')) {
-          throw new DOMException('Blocked', 'SecurityError');
-        }
-        return new OrigWorker(url, ...args);
-      };
-      window.Worker.prototype = OrigWorker.prototype;
+  
+  // 1. Override console.debug to prevent debugger detection
+  const origConsole = { ...console };
+  console.debug = () => {};
+  console.clear = () => {};
+  
+  // 2. Block eval with debugger
+  const origEval = window.eval;
+  window.eval = function(code) {
+    if (typeof code === 'string' && /debugger/i.test(code)) {
+      warn('🚫 Debugger in eval blocked');
+      return origEval.call(this, code.replace(/debugger\s*;?/gi, '/* removed */'));
     }
+    return origEval.call(this, code);
+  };
 
-    log('🚫 Anti-debugger active');
-  } catch (e) {}
+  // 3. Block Function constructor with debugger
+  const OrigFunction = window.Function;
+  window.Function = function(...args) {
+    const code = args[args.length - 1];
+    if (typeof code === 'string' && /debugger/i.test(code)) {
+      warn('🚫 Debugger in Function blocked');
+      args[args.length - 1] = code.replace(/debugger\s*;?/gi, '/* removed */');
+    }
+    return OrigFunction.apply(this, args);
+  };
+  window.Function.prototype = OrigFunction.prototype;
+
+  // 4. Block ALL types of Workers
+  if (window.Worker) {
+    const OrigWorker = window.Worker;
+    window.Worker = function(scriptURL, options) {
+      const url = String(scriptURL);
+      
+      // Block data: and blob: URLs
+      if (url.startsWith('data:') || url.startsWith('blob:')) {
+        warn(`🚫 Worker blocked: ${url.slice(0, 50)}`);
+        throw new DOMException('Worker blocked by security policy', 'SecurityError');
+      }
+      
+      // Check if URL contains debugger
+      if (url.includes('debugger') || url.includes('ZGVidWdnZXI')) { // base64 of 'debugger'
+        warn(`🚫 Suspicious worker blocked: ${url.slice(0, 50)}`);
+        throw new DOMException('Suspicious worker blocked', 'SecurityError');
+      }
+      
+      return new OrigWorker(scriptURL, options);
+    };
+    window.Worker.prototype = OrigWorker.prototype;
+  }
+
+  // 5. Block SharedWorker
+  if (window.SharedWorker) {
+    window.SharedWorker = function() {
+      warn('🚫 SharedWorker blocked');
+      throw new DOMException('SharedWorker not supported', 'NotSupportedError');
+    };
+  }
+
+  // 6. Intercept setTimeout/setInterval with debugger
+  const origSetTimeout = window.setTimeout;
+  const origSetInterval = window.setInterval;
+  
+  window.setTimeout = function(fn, delay, ...args) {
+    if (typeof fn === 'string' && /debugger/i.test(fn)) {
+      warn('🚫 setTimeout debugger blocked');
+      return;
+    }
+    return origSetTimeout.call(this, fn, delay, ...args);
+  };
+  
+  window.setInterval = function(fn, delay, ...args) {
+    if (typeof fn === 'string' && /debugger/i.test(fn)) {
+      warn('🚫 setInterval debugger blocked');
+      return;
+    }
+    return origSetInterval.call(this, fn, delay, ...args);
+  };
+
+  log('🚫 Anti-debugger active');
 
   // ============================================================
   // 🚫 NETWORK BLOCKER
@@ -132,7 +207,11 @@
     /\.ads\./i, /adserver/i, /preroll/i, /ad-overlay/i,
     /ima-ad/i, /jwpsrv\.js/i, /denied/i,
     /jwpltx\.com/i, /prd\.jwpltx/i,
-    /data:application\/javascript.*debugger/i
+    /doubleclick\./i, /googlesyndication\./i,
+    /sw\.js$/i, /service-worker\.js$/i, /serviceworker\.js$/i,
+    /data:application\/javascript.*debugger/i,
+    /blob:.*debugger/i,
+    /ZGVidWdnZXI/i // base64 'debugger'
   ];
 
   const ALLOWED_PATTERNS = [
@@ -143,8 +222,16 @@
   const shouldBlock = (url) => {
     const s = String(url);
     
-    if (s.startsWith('data:') && /debugger|crash2|error/i.test(s)) {
-      return true;
+    if (s.startsWith('data:')) {
+      try {
+        const decoded = atob(s.split(',')[1] || '');
+        if (/debugger/i.test(decoded)) {
+          warn(`🚫 Blocked data URL with debugger`);
+          return true;
+        }
+      } catch (e) {}
+      
+      if (/debugger|crash2|error/i.test(s)) return true;
     }
     
     if (ALLOWED_PATTERNS.some(p => p.test(s))) return false;
@@ -155,6 +242,7 @@
   const origFetch = window.fetch;
   window.fetch = function(url, ...args) {
     if (shouldBlock(url)) {
+      warn(`🚫 Fetch blocked: ${String(url).slice(0, 50)}`);
       return Promise.resolve(new Response('', {status: 204}));
     }
     return origFetch.call(this, url, ...args);
@@ -164,6 +252,7 @@
   const origOpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function(m, url, ...args) {
     if (shouldBlock(url)) {
+      warn(`🚫 XHR blocked: ${String(url).slice(0, 50)}`);
       this._blocked = true;
       return;
     }
@@ -291,9 +380,10 @@
   }
 
   // ============================================================
-  // 🔥 JW PLAYER HOOK
+  // 🔥 JW PLAYER HOOK - SUPER AGGRESSIVE
   // ============================================================
   let jwOrig = null;
+  let playerInstance = null;
   
   Object.defineProperty(window, 'jwplayer', {
     get: () => jwOrig,
@@ -304,17 +394,28 @@
         const p = val(id);
         if (!p) return p;
         
+        playerInstance = p;
+        
         const origSetup = p.setup;
         p.setup = function(cfg) {
           if (cfg) {
+            // Remove ALL ad configs
             delete cfg.advertising;
             delete cfg.preload;
+            delete cfg.vastPlugin;
+            delete cfg.ima;
+            delete cfg.googima;
+            delete cfg.freewheel;
             cfg.autostart = true;
+            cfg.mute = false;
             
             if (cfg.playlist) {
               cfg.playlist = cfg.playlist.map(i => {
                 delete i.adschedule;
                 delete i.advertising;
+                delete i.preroll;
+                delete i.vmap;
+                delete i.vastxml;
                 return i;
               });
             }
@@ -322,36 +423,118 @@
           
           const res = origSetup.call(this, cfg);
           
-          // Block all ad methods
-          this.playAd = () => { this.play(); return this; };
-          this.pauseAd = () => this;
-          this.skipAd = () => { this.play(); return this; };
-          
-          const forceSkip = () => {
-            setTimeout(() => {
-              try {
-                this.skipAd();
-                this.play();
-                
-                const pos = this.getPosition();
-                if (pos < 5) this.seek(5);
-                
-                const vol = this.getVolume();
-                this.setVolume(0);
-                setTimeout(() => this.setVolume(vol), 100);
-              } catch(e) {}
-            }, 10);
+          // Override ALL ad methods
+          this.playAd = function() { 
+            warn('❌ playAd called - forcing skip');
+            this.play();
+            return this;
           };
           
-          ['adStarted', 'adBreakStart', 'adImpression', 'adPlay', 'adRequest', 'adSchedule', 'adError'].forEach(evt => {
-            this.on(evt, forceSkip);
+          this.pauseAd = function() {
+            warn('❌ pauseAd called - ignoring');
+            return this;
+          };
+          
+          this.skipAd = function() { 
+            warn('✅ skipAd called - forcing play');
+            this.play();
+            return this;
+          };
+          
+          // Aggressive ad skipper
+          const forcePlay = () => {
+            setTimeout(() => {
+              try {
+                const state = this.getState();
+                
+                // Force play if not playing
+                if (state !== 'playing') {
+                  this.play();
+                }
+                
+                // Skip first 5 seconds
+                const pos = this.getPosition();
+                if (pos < 5) {
+                  this.seek(5);
+                  warn(`⏭️ Skipped to 5s (was at ${pos}s)`);
+                }
+                
+                // Unmute if muted
+                if (this.getMute()) {
+                  this.setMute(false);
+                  warn('🔊 Unmuted player');
+                }
+                
+                // Ensure volume
+                const vol = this.getVolume();
+                if (vol === 0) {
+                  this.setVolume(100);
+                  warn('🔊 Volume restored to 100');
+                }
+              } catch(e) {
+                warn(`Error in forcePlay: ${e.message}`);
+              }
+            }, 50);
+          };
+          
+          // Listen to ALL ad events
+          const adEvents = [
+            'adStarted', 'adBreakStart', 'adImpression', 'adPlay', 
+            'adRequest', 'adSchedule', 'adError', 'adBlock',
+            'adClick', 'adCompanions', 'adComplete', 'adSkipped',
+            'adTime', 'adViewableImpression', 'adMeta',
+            'beforePlay', 'playlistItem', 'ready', 'pause'
+          ];
+          
+          adEvents.forEach(evt => {
+            this.on(evt, (e) => {
+              if (e && e.type && /ad/i.test(e.type)) {
+                warn(`🚫 Ad event blocked: ${e.type}`);
+              }
+              forcePlay();
+            });
           });
           
-          this.on('time', (e) => {
-            if (this.getState() === 'paused' && e.position > 0) {
-              setTimeout(() => this.play(), 50);
+          // Monitor state changes
+          this.on('state', (e) => {
+            if (e.newstate === 'paused' || e.newstate === 'idle') {
+              warn(`⚠️ State changed to ${e.newstate} - forcing play`);
+              forcePlay();
             }
           });
+          
+          // Monitor playback
+          let lastPos = 0;
+          this.on('time', (e) => {
+            // Detect if stuck at beginning (ad playing)
+            if (e.position < 5 && e.position === lastPos && e.position > 0) {
+              warn('⚠️ Stuck at beginning - force seeking');
+              this.seek(5);
+            }
+            lastPos = e.position;
+            
+            // Auto-play if paused
+            const state = this.getState();
+            if (state === 'paused' && e.position > 0) {
+              setTimeout(() => this.play(), 100);
+            }
+          });
+          
+          // Force play when ready
+          this.on('ready', () => {
+            warn('✅ Player ready - forcing play');
+            setTimeout(() => {
+              this.play();
+              this.seek(5);
+              this.setMute(false);
+              this.setVolume(100);
+            }, 200);
+          });
+          
+          // Force play immediately
+          setTimeout(() => {
+            forcePlay();
+          }, 500);
           
           return res;
         };
@@ -365,10 +548,29 @@
       
       if (val.prototype) jwOrig.prototype = val.prototype;
       
-      log('✅ JW Player hooked');
+      log('✅ JW Player hooked (super aggressive mode)');
     },
     configurable: true
   });
+
+  // Monitor for player and force play
+  setInterval(() => {
+    if (playerInstance) {
+      try {
+        const state = playerInstance.getState();
+        const pos = playerInstance.getPosition();
+        
+        if (state === 'paused' && pos < 5) {
+          playerInstance.play();
+          playerInstance.seek(5);
+        }
+        
+        if (playerInstance.getMute()) {
+          playerInstance.setMute(false);
+        }
+      } catch (e) {}
+    }
+  }, 500);
 
   // ============================================================
   // 🎨 CSS INJECTION
@@ -385,7 +587,8 @@
       #shadow-root,[id*="shadow"],[class*="backdrop"],
       [class*="overlay"]:not(.watch-player):not(video),
       div[style*="position: fixed"][style*="z-index"],
-      div[style*="position: absolute"][style*="z-index: 9999"]{
+      div[style*="position: absolute"][style*="z-index: 9999"],
+      .jw-flag-ads,.jw-flag-ads-googleima,.jw-flag-advertising{
         display:none!important;
         opacity:0!important;
         pointer-events:none!important;
@@ -408,7 +611,7 @@
       '[class*="man88"]','[class*="lu88"]','[class*="sspp"]','[class*="robong"]',
       '.denied-box','.ad-overlay','.ima-ad-container','.app-box-fix','.content-rb',
       '[class*="preroll"]','[class*="ads"]:not(.watch-player)',
-      '.jw-ad','.jw-ad-container',
+      '.jw-ad','.jw-ad-container','.jw-flag-ads',
       '.modal-backdrop','.fade.modal-backdrop','.modal-backdrop.show',
       '[id*="shadow-root"]','#shadow-root',
       '[class*="backdrop"]','[class*="overlay"]:not(.watch-player)'
@@ -417,7 +620,6 @@
     let count = 0;
     
     const clean = () => {
-      // Remove ad elements
       document.querySelectorAll(AD_SELECTORS.join(',')).forEach(el => {
         if (!el.closest('video,#embed-player,.jwplayer,.watch-player')) {
           el.remove();
@@ -425,14 +627,12 @@
         }
       });
       
-      // Unlock body scroll
       if (document.body) {
         document.body.classList.remove('modal-open');
         document.body.style.overflow = '';
         document.body.style.paddingRight = '';
       }
       
-      // Remove high z-index overlays
       document.querySelectorAll('div[style*="position:"][style*="z-index"]').forEach(el => {
         const style = window.getComputedStyle(el);
         const zIndex = parseInt(style.zIndex);
@@ -447,11 +647,9 @@
       });
     };
 
-    // Initial + periodic cleaning
     clean();
     setInterval(clean, 500);
     
-    // Observe DOM changes
     const obs = new MutationObserver(clean);
     obs.observe(document.documentElement, {childList: true, subtree: true});
     
@@ -467,7 +665,6 @@
   window.alert = () => {};
   window.confirm = () => false;
 
-  // ESC key to close modals
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       document.querySelectorAll('.modal-backdrop,[class*="backdrop"]').forEach(el => el.remove());
