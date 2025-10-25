@@ -1,5 +1,5 @@
 // ============================================================
-// 🛡️ ROPHIM ADBLOCK - OPTIMIZED VERSION
+// 🛡️ ROPHIM ADBLOCK - SMART SKIP VERSION
 // ============================================================
 (() => {
   'use strict';
@@ -53,15 +53,15 @@
   log('🍪 Cookie protection active');
 
   // ============================================================
-  // 🚫 NETWORK BLOCKER - PRECISION MODE
+  // 🚫 SMART NETWORK INTERCEPTOR
   // ============================================================
   const BLOCKED_PATTERNS = [
     // Crash/Error pages
-    /crash2\.html/i, /error\.html/i, /ping\.gif/i, /report_issue/i,
+    /crash2\.html/i, /error\.html/i, /report_issue/i,
     
-    // Ad domains
+    // Ad domains (non-streaming)
     /man88/i, /lu88/i, /sspp/i, /robong\./i,
-    /\.ads\./i, /adserver/i, /preroll/i, /ad-overlay/i,
+    /\.ads\./i, /adserver/i, /ad-overlay/i,
     /ima-ad/i, /jwpsrv\.js/i, /denied/i,
     
     // JWP tracking
@@ -71,57 +71,146 @@
     /doubleclick\./i, /googlesyndication\./i
   ];
 
-  // ⭐ ONLY block CVT requests with /pmolink/ path
+  // ⭐ Check if CVT ad request
   const isCVTAd = (url) => {
     const s = String(url);
     return /cvt\.finallygotthexds\.site/i.test(s) && /\/pmolink\//i.test(s);
   };
 
+  // ⭐ Check if content request
+  const isContentStream = (url) => {
+    const s = String(url);
+    return /sundaythekingplays\.site/i.test(s) && /\/hls\//i.test(s);
+  };
+
   const shouldBlock = (url) => {
     const s = String(url);
     
-    // Block CVT ad requests
-    if (isCVTAd(s)) {
-      warn(`🚫 CVT ad blocked: ${s.slice(0, 80)}...`);
-      return true;
+    // NEVER block content streams
+    if (isContentStream(s)) {
+      return false;
     }
     
-    // Block other ad patterns (but NOT .m3u8 files)
+    // NEVER block .m3u8 or .ts files (HLS segments)
     if (s.endsWith('.m3u8') || s.endsWith('.ts')) {
-      return false; // Allow ALL HLS streams
+      return false;
     }
     
+    // Block non-streaming patterns
     return BLOCKED_PATTERNS.some(p => p.test(s));
   };
 
-  // Fetch hook
+  // ⭐ FAKE SUCCESS for CVT ads - make it think ads loaded
+  const createFakeM3U8Response = () => {
+    // Minimal valid HLS playlist that completes immediately
+    const fakePlaylist = `#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:1
+#EXTINF:0.1,
+#EXT-X-ENDLIST`;
+    
+    return new Response(fakePlaylist, {
+      status: 200,
+      statusText: 'OK',
+      headers: {
+        'Content-Type': 'application/vnd.apple.mpegurl',
+        'Content-Length': fakePlaylist.length.toString(),
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
+  };
+
+  // Fetch hook with smart handling
   const origFetch = window.fetch;
-  window.fetch = function(url, ...args) {
-    if (shouldBlock(url)) {
-      warn(`🚫 Fetch blocked: ${String(url).slice(0, 50)}...`);
+  window.fetch = async function(url, ...args) {
+    const urlStr = String(url);
+    
+    // Block non-streaming ads
+    if (shouldBlock(urlStr)) {
+      warn(`🚫 Blocked: ${urlStr.slice(0, 50)}...`);
       return Promise.resolve(new Response('', {status: 204}));
     }
+    
+    // ⭐ Intercept CVT ad requests - return fake success
+    if (isCVTAd(urlStr)) {
+      warn(`🎯 CVT ad intercepted - returning fake success: ${urlStr.slice(0, 60)}...`);
+      
+      // Return fake but valid HLS response
+      if (urlStr.endsWith('.m3u8')) {
+        return Promise.resolve(createFakeM3U8Response());
+      }
+      
+      // For .ts segments, return empty but valid
+      return Promise.resolve(new Response(new Uint8Array(0), {
+        status: 200,
+        headers: {
+          'Content-Type': 'video/MP2T',
+          'Content-Length': '0'
+        }
+      }));
+    }
+    
+    // ⭐ Log content requests (for debugging)
+    if (isContentStream(urlStr)) {
+      log(`📺 Content loading: ${urlStr.slice(0, 80)}...`);
+    }
+    
+    // Allow everything else
     return origFetch.call(this, url, ...args);
   };
 
-  // XHR hook
+  // XHR hook with same logic
   const origOpen = XMLHttpRequest.prototype.open;
+  const origSend = XMLHttpRequest.prototype.send;
+  
   XMLHttpRequest.prototype.open = function(m, url, ...args) {
-    if (shouldBlock(url)) {
-      warn(`🚫 XHR blocked: ${String(url).slice(0, 50)}...`);
-      this._blocked = true;
+    const urlStr = String(url);
+    
+    this._url = urlStr;
+    this._isCVTAd = isCVTAd(urlStr);
+    this._isBlocked = shouldBlock(urlStr) && !this._isCVTAd;
+    
+    if (this._isBlocked) {
+      warn(`🚫 XHR blocked: ${urlStr.slice(0, 50)}...`);
       return;
     }
+    
+    if (this._isCVTAd) {
+      warn(`🎯 CVT ad XHR intercepted: ${urlStr.slice(0, 60)}...`);
+    }
+    
     return origOpen.call(this, m, url, ...args);
   };
-
-  const origSend = XMLHttpRequest.prototype.send;
+  
   XMLHttpRequest.prototype.send = function(...args) {
-    if (this._blocked) return;
+    if (this._isBlocked) return;
+    
+    // ⭐ Fake response for CVT ads
+    if (this._isCVTAd) {
+      setTimeout(() => {
+        Object.defineProperty(this, 'status', { value: 200, writable: false });
+        Object.defineProperty(this, 'statusText', { value: 'OK', writable: false });
+        Object.defineProperty(this, 'readyState', { value: 4, writable: false });
+        
+        if (this._url.endsWith('.m3u8')) {
+          Object.defineProperty(this, 'responseText', { 
+            value: '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-ENDLIST', 
+            writable: false 
+          });
+        } else {
+          Object.defineProperty(this, 'response', { value: new Uint8Array(0), writable: false });
+        }
+        
+        if (this.onload) this.onload();
+        if (this.onreadystatechange) this.onreadystatechange();
+      }, 10);
+      return;
+    }
+    
     return origSend.call(this, ...args);
   };
 
-  log('🚫 Network blocker active (CVT ads only)');
+  log('🚫 Smart network interceptor active');
 
   // ============================================================
   // 🎯 URL PROTECTION
@@ -175,7 +264,7 @@
     /bet/i, /casino/i
   ];
   
-  const isAdDomain = url => AD_DOMAINS.some(p => p.test(String(url))) || isCVTAd(url);
+  const isAdDomain = url => AD_DOMAINS.some(p => p.test(String(url)));
 
   try {
     const LocationProto = Object.getPrototypeOf(location);
@@ -240,10 +329,11 @@
   }
 
   // ============================================================
-  // 🔥 JW PLAYER HOOK - FORCE SKIP ADS
+  // 🔥 JW PLAYER HOOK - INTELLIGENT SKIP
   // ============================================================
   let jwOrig = null;
   let playerInstance = null;
+  let adSkipped = false;
   
   Object.defineProperty(window, 'jwplayer', {
     get: () => jwOrig,
@@ -259,7 +349,7 @@
         const origSetup = p.setup;
         p.setup = function(cfg) {
           if (cfg) {
-            // Remove ALL ad configs
+            // Remove ad configs
             delete cfg.advertising;
             delete cfg.preload;
             delete cfg.vastPlugin;
@@ -285,86 +375,87 @@
           
           // Override ad methods
           this.playAd = function() { 
-            warn('❌ playAd blocked - forcing play');
+            warn('❌ playAd blocked');
             this.play();
             return this;
           };
           
           this.pauseAd = function() {
-            warn('❌ pauseAd blocked');
             return this;
           };
           
           this.skipAd = function() { 
-            warn('✅ skipAd - forcing play');
             this.play();
             return this;
           };
           
-          // ⭐ FORCE SKIP AFTER 5 SECONDS
-          const forceSkipAds = () => {
-            setTimeout(() => {
-              try {
-                const state = this.getState();
-                const pos = this.getPosition();
+          // ⭐ Smart skip logic
+          const smartSkip = () => {
+            try {
+              const pos = this.getPosition();
+              const dur = this.getDuration();
+              
+              // If at beginning and short duration (likely ad), skip ahead
+              if (pos < 3 && dur < 30 && !adSkipped) {
+                warn(`⏭️ Detected short content (${dur}s) - skipping to real content`);
                 
-                // If stuck at beginning (ad playing), skip to 5s
-                if (pos < 5 && state !== 'playing') {
-                  this.play();
-                  this.seek(5);
-                  warn(`⏭️ Force skipped to 5s (was at ${pos}s)`);
+                // Try to skip to next playlist item or seek forward
+                const playlist = this.getPlaylist();
+                const currentIndex = this.getPlaylistIndex();
+                
+                if (playlist && playlist.length > currentIndex + 1) {
+                  this.playlistItem(currentIndex + 1);
+                  warn('✅ Jumped to next playlist item');
+                } else {
+                  this.seek(Math.min(5, dur - 0.5));
+                  warn('✅ Seeked forward');
                 }
                 
-                // Unmute and restore volume
-                if (this.getMute()) {
-                  this.setMute(false);
-                  warn('🔊 Unmuted player');
-                }
+                adSkipped = true;
                 
-                const vol = this.getVolume();
-                if (vol === 0) {
-                  this.setVolume(100);
-                  warn('🔊 Volume restored');
-                }
-              } catch(e) {}
-            }, 50);
+                // Reset flag after content starts
+                setTimeout(() => { adSkipped = false; }, 5000);
+              }
+              
+              // Ensure playing
+              if (this.getState() !== 'playing' && pos > 0) {
+                this.play();
+              }
+              
+              // Unmute
+              if (this.getMute()) {
+                this.setMute(false);
+              }
+            } catch(e) {}
           };
           
-          // Listen to ad events and force skip
-          const adEvents = [
-            'adStarted', 'adBreakStart', 'adImpression', 'adPlay', 
-            'adRequest', 'adSchedule', 'adError', 'adBlock',
-            'beforePlay', 'ready', 'pause'
-          ];
-          
-          adEvents.forEach(evt => {
-            this.on(evt, () => {
-              warn(`🚫 Ad event: ${evt} - forcing skip`);
-              forceSkipAds();
-            });
+          // Listen to events
+          this.on('playlistItem', () => {
+            warn('📺 Playlist item changed');
+            setTimeout(smartSkip, 500);
           });
           
-          // Monitor state changes
-          this.on('state', (e) => {
-            if (e.newstate === 'paused' || e.newstate === 'idle') {
-              warn(`⚠️ State: ${e.newstate} - forcing play`);
-              forceSkipAds();
+          this.on('ready', () => {
+            warn('✅ Player ready');
+            setTimeout(() => {
+              this.play();
+              this.setMute(false);
+              smartSkip();
+            }, 300);
+          });
+          
+          this.on('time', () => {
+            const pos = this.getPosition();
+            const dur = this.getDuration();
+            
+            // Continuously check if stuck on short content
+            if (pos < 3 && dur < 30 && dur > 0) {
+              smartSkip();
             }
           });
           
-          // Auto-play when ready
-          this.on('ready', () => {
-            warn('✅ Player ready - starting playback');
-            setTimeout(() => {
-              this.play();
-              this.seek(5); // Skip first 5s (usually ads)
-              this.setMute(false);
-              this.setVolume(100);
-            }, 200);
-          });
-          
-          // Initial force skip
-          setTimeout(forceSkipAds, 500);
+          // Initial skip
+          setTimeout(smartSkip, 800);
           
           return res;
         };
@@ -378,31 +469,10 @@
       
       if (val.prototype) jwOrig.prototype = val.prototype;
       
-      log('✅ JW Player hooked (force skip mode)');
+      log('✅ JW Player hooked (intelligent skip)');
     },
     configurable: true
   });
-
-  // Monitor player and force play if stuck
-  setInterval(() => {
-    if (playerInstance) {
-      try {
-        const state = playerInstance.getState();
-        const pos = playerInstance.getPosition();
-        
-        // If paused at beginning, force play and skip
-        if (state === 'paused' && pos < 5) {
-          playerInstance.play();
-          playerInstance.seek(5);
-        }
-        
-        // Ensure unmuted
-        if (playerInstance.getMute()) {
-          playerInstance.setMute(false);
-        }
-      } catch (e) {}
-    }
-  }, 1000);
 
   // ============================================================
   // 🎨 CSS INJECTION - HIDE ADS
@@ -428,13 +498,11 @@
         visibility:hidden!important;
       }
       
-      /* Ensure body is scrollable */
       body.modal-open{
         overflow:auto!important;
         padding-right:0!important;
       }
       
-      /* Ensure player is visible */
       .watch-player,video,#embed-player,.jwplayer{
         display:block!important;
         visibility:visible!important;
@@ -518,5 +586,5 @@
   // ============================================================
   // ✅ COMPLETE
   // ============================================================
-  log('🟢 AdBlock active - Lightweight mode (CVT ads blocked, all .m3u8 visible)');
+  log('🟢 Smart AdBlock activated');
 })();
