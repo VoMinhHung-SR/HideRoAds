@@ -1,5 +1,5 @@
 // ============================================================
-// 🛡️ ROPHIM ADBLOCK - SMART SKIP VERSION
+// 🛡️ ROPHIM ADBLOCK - OPTIMIZED VERSION
 // ============================================================
 (() => {
   'use strict';
@@ -11,9 +11,10 @@
 
   const log = msg => console.log(`✅ [${isGoat ? 'Goat' : 'RoPhim'}] ${msg}`);
   const warn = msg => console.warn(`⚠️ [${isGoat ? 'Goat' : 'RoPhim'}] ${msg}`);
+  const debug = msg => console.log(`🔍 [DEBUG] ${msg}`);
 
   // ============================================================
-  // 🍪 COOKIE PROTECTION
+  // 🍪 COOKIE PROTECTION (Checked)
   // ============================================================
   const COOKIE_CONFIG = {
     path: '/',
@@ -53,12 +54,12 @@
   log('🍪 Cookie protection active');
 
   // ============================================================
-  // 🚫 SMART NETWORK INTERCEPTOR
+  // 🚫 SMART NETWORK INTERCEPTOR (Checked)
   // ============================================================
   const BLOCKED_PATTERNS = [
     // Crash/Error pages
     /crash2\.html/i, /error\.html/i, /report_issue/i,
-    
+
     // Ad domains (non-streaming)
     /man88/i, /lu88/i, /sspp/i, /robong\./i,
     /\.ads\./i, /adserver/i, /ad-overlay/i,
@@ -71,146 +72,56 @@
     /doubleclick\./i, /googlesyndication\./i
   ];
 
-  // ⭐ Check if CVT ad request
+  // ⭐ Block ad requests with common ad paths
   const isCVTAd = (url) => {
     const s = String(url);
-    return /cvt\.finallygotthexds\.site/i.test(s) && /\/pmolink\//i.test(s);
-  };
-
-  // ⭐ Check if content request
-  const isContentStream = (url) => {
-    const s = String(url);
-    return /sundaythekingplays\.site/i.test(s) && /\/hls\//i.test(s);
+    // Block any domain with ad-related paths
+    return /\/pmolink\//i.test(s) || /\/vpromolink\//i.test(s) || 
+           /\/ad\//i.test(s) || /\/ads\//i.test(s) || /\/promo\//i.test(s);
   };
 
   const shouldBlock = (url) => {
     const s = String(url);
-    
-    // NEVER block content streams
-    if (isContentStream(s)) {
-      return false;
+    // Block CVT ad requests
+    if (isCVTAd(s)) {
+      warn(`🚫 CVT ad blocked: ${s.slice(0, 80)}...`);
+      return true;
     }
     
-    // NEVER block .m3u8 or .ts files (HLS segments)
+    // Block other ad patterns (but NOT .m3u8 files)
     if (s.endsWith('.m3u8') || s.endsWith('.ts')) {
-      return false;
+      return false; // Allow ALL HLS streams
     }
     
-    // Block non-streaming patterns
     return BLOCKED_PATTERNS.some(p => p.test(s));
   };
 
-  // ⭐ FAKE SUCCESS for CVT ads - make it think ads loaded
-  const createFakeM3U8Response = () => {
-    // Minimal valid HLS playlist that completes immediately
-    const fakePlaylist = `#EXTM3U
-#EXT-X-VERSION:3
-#EXT-X-TARGETDURATION:1
-#EXTINF:0.1,
-#EXT-X-ENDLIST`;
-    
-    return new Response(fakePlaylist, {
-      status: 200,
-      statusText: 'OK',
-      headers: {
-        'Content-Type': 'application/vnd.apple.mpegurl',
-        'Content-Length': fakePlaylist.length.toString(),
-        'Access-Control-Allow-Origin': '*'
-      }
-    });
-  };
-
-  // Fetch hook with smart handling
+  // Fetch hook
   const origFetch = window.fetch;
-  window.fetch = async function(url, ...args) {
-    const urlStr = String(url);
-    
-    // Block non-streaming ads
-    if (shouldBlock(urlStr)) {
-      warn(`🚫 Blocked: ${urlStr.slice(0, 50)}...`);
+  window.fetch = function(url, ...args) {
+    if (shouldBlock(url)) {
+      warn(`🚫 Fetch blocked: ${String(url).slice(0, 50)}...`);
       return Promise.resolve(new Response('', {status: 204}));
     }
-    
-    // ⭐ Intercept CVT ad requests - return fake success
-    if (isCVTAd(urlStr)) {
-      warn(`🎯 CVT ad intercepted - returning fake success: ${urlStr.slice(0, 60)}...`);
-      
-      // Return fake but valid HLS response
-      if (urlStr.endsWith('.m3u8')) {
-        return Promise.resolve(createFakeM3U8Response());
-      }
-      
-      // For .ts segments, return empty but valid
-      return Promise.resolve(new Response(new Uint8Array(0), {
-        status: 200,
-        headers: {
-          'Content-Type': 'video/MP2T',
-          'Content-Length': '0'
-        }
-      }));
-    }
-    
-    // ⭐ Log content requests (for debugging)
-    if (isContentStream(urlStr)) {
-      log(`📺 Content loading: ${urlStr.slice(0, 80)}...`);
-    }
-    
-    // Allow everything else
     return origFetch.call(this, url, ...args);
   };
 
-  // XHR hook with same logic
+  // XHR hook
   const origOpen = XMLHttpRequest.prototype.open;
-  const origSend = XMLHttpRequest.prototype.send;
-  
   XMLHttpRequest.prototype.open = function(m, url, ...args) {
-    const urlStr = String(url);
-    
-    this._url = urlStr;
-    this._isCVTAd = isCVTAd(urlStr);
-    this._isBlocked = shouldBlock(urlStr) && !this._isCVTAd;
-    
-    if (this._isBlocked) {
-      warn(`🚫 XHR blocked: ${urlStr.slice(0, 50)}...`);
+    if (shouldBlock(url)) {
+      warn(`🚫 XHR blocked: ${String(url).slice(0, 50)}...`);
+      this._blocked = true;
       return;
     }
-    
-    if (this._isCVTAd) {
-      warn(`🎯 CVT ad XHR intercepted: ${urlStr.slice(0, 60)}...`);
-    }
-    
     return origOpen.call(this, m, url, ...args);
   };
-  
+
+  const origSend = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.send = function(...args) {
-    if (this._isBlocked) return;
-    
-    // ⭐ Fake response for CVT ads
-    if (this._isCVTAd) {
-      setTimeout(() => {
-        Object.defineProperty(this, 'status', { value: 200, writable: false });
-        Object.defineProperty(this, 'statusText', { value: 'OK', writable: false });
-        Object.defineProperty(this, 'readyState', { value: 4, writable: false });
-        
-        if (this._url.endsWith('.m3u8')) {
-          Object.defineProperty(this, 'responseText', { 
-            value: '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-ENDLIST', 
-            writable: false 
-          });
-        } else {
-          Object.defineProperty(this, 'response', { value: new Uint8Array(0), writable: false });
-        }
-        
-        if (this.onload) this.onload();
-        if (this.onreadystatechange) this.onreadystatechange();
-      }, 10);
-      return;
-    }
-    
+    if (this._blocked) return;
     return origSend.call(this, ...args);
   };
-
-  log('🚫 Smart network interceptor active');
 
   // ============================================================
   // 🎯 URL PROTECTION
@@ -264,7 +175,7 @@
     /bet/i, /casino/i
   ];
   
-  const isAdDomain = url => AD_DOMAINS.some(p => p.test(String(url)));
+  const isAdDomain = url => AD_DOMAINS.some(p => p.test(String(url))) || isCVTAd(url);
 
   try {
     const LocationProto = Object.getPrototypeOf(location);
@@ -288,52 +199,12 @@
   } catch (e) {}
 
   // ============================================================
-  // 🎯 IFRAME MANAGER
-  // ============================================================
-  if (isRophim) {
-    const match = location.pathname.match(/([A-Za-z0-9_-]{8,})/);
-    if (match) {
-      try { sessionStorage.setItem('rophim_vid', match[0]); } catch (e) {}
-    }
-    
-    const getCorrectUrl = () => {
-      if (!match) return null;
-      const p = new URLSearchParams(location.search);
-      return `https://goatembed.com/${match[0]}?version=${p.get('ver')||2}&season=${p.get('s')||1}&episode=${p.get('ep')||1}`;
-    };
-    
-    const origCreate = document.createElement;
-    document.createElement = function(tag, ...args) {
-      const el = origCreate.call(this, tag, ...args);
-      
-      if (tag.toLowerCase() === 'iframe') {
-        const srcDesc = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src');
-        
-        Object.defineProperty(el, 'src', {
-          get: srcDesc.get,
-          set(url) {
-            if (shouldBlock(url)) {
-              const fix = getCorrectUrl();
-              if (fix) return srcDesc.set.call(this, fix);
-              return;
-            }
-            return srcDesc.set.call(this, url);
-          }
-        });
-      }
-      
-      return el;
-    };
-    
-    log('🛡️ Iframe manager active');
-  }
-
-  // ============================================================
-  // 🔥 JW PLAYER HOOK - INTELLIGENT SKIP
+  // 🔥 JW PLAYER HOOK - FORCE SKIP ADS
   // ============================================================
   let jwOrig = null;
   let playerInstance = null;
   let adSkipped = false;
+  let skipInProgress = false;
   
   Object.defineProperty(window, 'jwplayer', {
     get: () => jwOrig,
@@ -389,73 +260,143 @@
             return this;
           };
           
-          // ⭐ Smart skip logic
-          const smartSkip = () => {
+          // ⭐ Force skip method for manual control
+          this.forceSkip = function() {
             try {
               const pos = this.getPosition();
               const dur = this.getDuration();
+              const playlist = this.getPlaylist();
+              const currentIndex = this.getPlaylistIndex();
               
-              // If at beginning and short duration (likely ad), skip ahead
-              if (pos < 3 && dur < 30 && !adSkipped) {
-                warn(`⏭️ Detected short content (${dur}s) - skipping to real content`);
+              console.log(`🚀 FORCE SKIP COMMAND - Position: ${pos}s, Duration: ${dur}s`);
+              
+              // Strategy 1: Jump to next playlist item
+              if (playlist && playlist.length > currentIndex + 1) {
+                this.playlistItem(currentIndex + 1);
+                console.log('✅ FORCE SKIP: Jumped to next playlist item');
+                return true;
+              }
+              
+              // Strategy 2: Seek to end of current item
+              if (dur > 0) {
+                const seekTo = Math.min(dur - 0.5, 15);
+                this.seek(seekTo);
+                console.log(`✅ FORCE SKIP: Seeked to ${seekTo}s`);
+                return true;
+              }
+              
+              // Strategy 3: Force play
+              this.play();
+              this.setMute(false);
+              console.log('✅ FORCE SKIP: Force play activated');
+              return true;
+            } catch(e) {
+              console.error('❌ FORCE SKIP ERROR:', e.message);
+              return false;
+            }
+          };
+          
+          // ⭐ ULTRA FAST SKIP - Immediate detection and action
+          const ultraFastSkip = () => {
+            if (skipInProgress) return;
+            
+            try {
+              const pos = this.getPosition();
+              const dur = this.getDuration();
+              const state = this.getState();
+              
+              // 🔍 ULTRA FAST DETECTION - More aggressive
+              const isAd = (dur < 60 && dur > 0) || 
+                          (pos < 3 && dur < 30) ||
+                          (dur < 45 && pos < 5) ||
+                          (state === 'paused' && pos < 10);
+              
+              if (isAd && !adSkipped) {
+                skipInProgress = true;
+                warn(`🚀 ULTRA FAST SKIP - Ad detected (${dur}s) - IMMEDIATE ACTION`);
                 
-                // Try to skip to next playlist item or seek forward
+                // IMMEDIATE ACTION - No delays
                 const playlist = this.getPlaylist();
                 const currentIndex = this.getPlaylistIndex();
                 
+                // Strategy 1: Instant playlist jump
                 if (playlist && playlist.length > currentIndex + 1) {
                   this.playlistItem(currentIndex + 1);
-                  warn('✅ Jumped to next playlist item');
-                } else {
-                  this.seek(Math.min(5, dur - 0.5));
-                  warn('✅ Seeked forward');
+                  warn('⚡ INSTANT: Jumped to next playlist item');
+                } 
+                // Strategy 2: Instant seek to end
+                else if (dur > 0) {
+                  this.seek(Math.min(dur - 0.1, 15));
+                  warn(`⚡ INSTANT: Seeked to end`);
+                }
+                // Strategy 3: Force play
+                else {
+                  this.play();
+                  this.setMute(false);
+                  warn('⚡ INSTANT: Force play');
                 }
                 
                 adSkipped = true;
+                skipInProgress = false;
                 
-                // Reset flag after content starts
-                setTimeout(() => { adSkipped = false; }, 5000);
+                // Quick reset
+                setTimeout(() => { 
+                  adSkipped = false; 
+                  skipInProgress = false;
+                }, 3000);
               }
               
-              // Ensure playing
-              if (this.getState() !== 'playing' && pos > 0) {
-                this.play();
-              }
+              // Force play and unmute
+              if (state !== 'playing') this.play();
+              if (this.getMute()) this.setMute(false);
               
-              // Unmute
-              if (this.getMute()) {
-                this.setMute(false);
-              }
-            } catch(e) {}
+            } catch(e) {
+              skipInProgress = false;
+              debug(`❌ Ultra fast skip error: ${e.message}`);
+            }
           };
           
-          // Listen to events
+          // Listen to events with ULTRA FAST response
           this.on('playlistItem', () => {
             warn('📺 Playlist item changed');
-            setTimeout(smartSkip, 500);
+            // IMMEDIATE skip check
+            ultraFastSkip();
           });
           
           this.on('ready', () => {
             warn('✅ Player ready');
-            setTimeout(() => {
-              this.play();
-              this.setMute(false);
-              smartSkip();
-            }, 300);
+            // IMMEDIATE action
+            this.play();
+            this.setMute(false);
+            ultraFastSkip();
           });
           
           this.on('time', () => {
-            const pos = this.getPosition();
-            const dur = this.getDuration();
-            
-            // Continuously check if stuck on short content
-            if (pos < 3 && dur < 30 && dur > 0) {
-              smartSkip();
-            }
+            // ULTRA FAST continuous monitoring
+            ultraFastSkip();
           });
           
-          // Initial skip
-          setTimeout(smartSkip, 800);
+          // Listen for ad-related events
+          this.on('adPlay', () => {
+            debug(`🚫 AD PLAY EVENT - IMMEDIATE SKIP`);
+            ultraFastSkip();
+          });
+          
+          this.on('adBreakStart', () => {
+            debug(`🚫 AD BREAK START - IMMEDIATE SKIP`);
+            ultraFastSkip();
+          });
+          
+          this.on('instreamMode', () => {
+            debug(`🚫 INSTREAM MODE - IMMEDIATE SKIP`);
+            ultraFastSkip();
+          });
+          
+          // ⭐ IMMEDIATE initialization attempts
+          ultraFastSkip();
+          setTimeout(ultraFastSkip, 100);
+          setTimeout(ultraFastSkip, 300);
+          setTimeout(ultraFastSkip, 500);
           
           return res;
         };
@@ -474,15 +415,17 @@
     configurable: true
   });
 
+
   // ============================================================
   // 🎨 CSS INJECTION - HIDE ADS
   // ============================================================
   const injectCSS = () => {
     const css = document.createElement('style');
     css.textContent = `
-      /* Hide ad elements */
+      /* ⭐ Enhanced ad hiding - includes preroll elements */
       [class*="man88"],[class*="lu88"],[class*="sspp"],[class*="robong"],
       .denied-box,.ad-overlay,.ima-ad-container,.app-box-fix,
+      '.sspp-area', '.is-pop', '.ssp-pop-id',
       [class*="preroll"],[class*="ads"]:not(.watch-player),
       .jw-ad,.jw-ad-container,.content-rb,.rb-header,
       .modal-backdrop,.fade.modal-backdrop,.modal-backdrop.show,
@@ -491,13 +434,22 @@
       [class*="overlay"]:not(.watch-player):not(video),
       div[style*="position: fixed"][style*="z-index"],
       div[style*="position: absolute"][style*="z-index: 9999"],
-      .jw-flag-ads,.jw-flag-ads-googleima,.jw-flag-advertising{
-        display:none!important;
-        opacity:0!important;
-        pointer-events:none!important;
-        visibility:hidden!important;
-      }
+      .jw-flag-ads,.jw-flag-ads-googleima,.jw-flag-advertising,
+      /* ⭐ Preroll specific elements */
+      .jw-skip,.jw-skip-button,.jw-skiptext,.jw-skip-icon,
+      .jw-countdown,.jw-countdown-container,.jw-countdown-show,
+      .jw-ad-skip,.jw-ad-skip-button,.jw-ad-countdown,
+      .jw-ima-ad-container,.jw-ima-ad-overlay,
+      .jw-ad-display,.jw-ad-controls,.jw-ad-message,
+      [class*="skip"],[class*="countdown"],[class*="ad-"],
+      [id*="skip"],[id*="countdown"],[id*="ad-"],
+      /* ⭐ Instream ad elements */
+      .jw-instream,.jw-instream-ad,.jw-ad-break,
+      .jw-ad-marker,.jw-ad-cue,.jw-ad-timeline,
+      /* ⭐ CVT ad elements */
+      [class*="cvt"],[id*="cvt"],[class*="pmolink"],
       
+      /* ⭐ Force player visibility */
       body.modal-open{
         overflow:auto!important;
         padding-right:0!important;
@@ -508,9 +460,20 @@
         visibility:visible!important;
         opacity:1!important;
       }
+      
+      /* ⭐ Hide ad overlays and backdrops */
+      [class*="backdrop"]:not(.watch-player),
+      [class*="overlay"]:not(.watch-player):not(video),
+      div[style*="position: fixed"][style*="z-index: 9999"],
+      div[style*="position: absolute"][style*="z-index: 9999"]{
+        display:none!important;
+        opacity:0!important;
+        pointer-events:none!important;
+        visibility:hidden!important;
+      }
     `;
     (document.head || document.documentElement).appendChild(css);
-    log('🎨 CSS injected');
+    log('🎨 Enhanced CSS injected (preroll blocking)');
   };
 
   injectCSS();
@@ -524,16 +487,41 @@
       '.denied-box','.ad-overlay','.ima-ad-container','.app-box-fix','.content-rb',
       '[class*="preroll"]','[class*="ads"]:not(.watch-player)',
       '.jw-ad','.jw-ad-container','.jw-flag-ads',
+      '.sspp-area', '.is-pop', '.ssp-pop-id',
       '.modal-backdrop','.fade.modal-backdrop','.modal-backdrop.show',
       '[id*="shadow-root"]','#shadow-root',
-      '[class*="backdrop"]','[class*="overlay"]:not(.watch-player)'
+      '[class*="backdrop"]','[class*="overlay"]:not(.watch-player)',
+      /* ⭐ Preroll specific selectors */
+      '.jw-skip','.jw-skip-button','.jw-skiptext','.jw-skip-icon',
+      '.jw-countdown','.jw-countdown-container','.jw-countdown-show',
+      '.jw-ad-skip','.jw-ad-skip-button','.jw-ad-countdown',
+      '.jw-ima-ad-container','.jw-ima-ad-overlay',
+      '.jw-ad-display','.jw-ad-controls','.jw-ad-message',
+      '[class*="skip"]','[class*="countdown"]','[class*="ad-"]',
+      '[id*="skip"]','[id*="countdown"]','[id*="ad-"]',
+      /* ⭐ Instream ad selectors */
+      '.jw-instream','.jw-instream-ad','.jw-ad-break',
+      '.jw-ad-marker','.jw-ad-cue','.jw-ad-timeline',
+      /* ⭐ CVT ad selectors */
+      '[class*="cvt"]','[id*="cvt"]','[class*="pmolink"]',
+      '[class*="finallygotthexds"]','[class*="sundaythekingplays"]'
     ];
 
     let count = 0;
     
     const clean = () => {
-      document.querySelectorAll(AD_SELECTORS.join(',')).forEach(el => {
+      const foundAds = document.querySelectorAll(AD_SELECTORS.join(','));
+      
+      if (foundAds.length > 0) {
+        debug(`🧹 FOUND ${foundAds.length} AD ELEMENTS`);
+        foundAds.forEach((el, index) => {
+          debug(`🧹 AD ELEMENT ${index + 1}: ${el.tagName}.${el.className} - ${el.id || 'no-id'}`);
+        });
+      }
+      
+      foundAds.forEach(el => {
         if (!el.closest('video,#embed-player,.jwplayer,.watch-player')) {
+          debug(`🗑️ REMOVING AD ELEMENT: ${el.tagName}.${el.className}`);
           el.remove();
           count++;
         }
@@ -552,6 +540,7 @@
         if (zIndex > 9000 && !el.closest('video,#embed-player,.jwplayer,.watch-player')) {
           const rect = el.getBoundingClientRect();
           if (rect.width > window.innerWidth * 0.8 && rect.height > window.innerHeight * 0.8) {
+            debug(`🗑️ REMOVING HIGH Z-INDEX ELEMENT: z-index=${zIndex}`);
             el.remove();
             count++;
           }
@@ -562,7 +551,29 @@
     clean();
     setInterval(clean, 500);
     
-    const obs = new MutationObserver(clean);
+    const obs = new MutationObserver((mutations) => {
+      let hasAdElements = false;
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (node.nodeType === 1) { // Element node
+            const element = node;
+            // Check if new element matches ad selectors
+            AD_SELECTORS.forEach(selector => {
+              if (element.matches && element.matches(selector)) {
+                debug(`🆕 NEW AD ELEMENT DETECTED: ${element.tagName}.${element.className}`);
+                hasAdElements = true;
+              }
+            });
+          }
+        });
+      });
+      
+      if (hasAdElements) {
+        debug(`🔄 MUTATION DETECTED - Running clean`);
+        clean();
+      }
+    });
+    
     obs.observe(document.documentElement, {childList: true, subtree: true});
     
     setTimeout(() => {
@@ -584,7 +595,60 @@
   }, true);
 
   // ============================================================
+  // 🎯 ULTRA FAST DOM-BASED SKIP (Backup system)
+  // ============================================================
+  const ultraFastDomSkip = () => {
+    // Check for JW Player skip button - IMMEDIATE action
+    const skipButton = document.querySelector('.jw-skip, .jw-skip-button, [class*="skip"]');
+    if (skipButton && skipButton.offsetParent !== null) {
+      const text = skipButton.textContent?.trim();
+      if (text === 'Bỏ qua' || skipButton.classList.contains('jw-skippable') || text.includes('Skip')) {
+        debug(`⚡ DOM SKIP: Auto-clicking skip button`);
+        skipButton.click();
+        return true;
+      }
+    }
+    
+    // Check for short videos (ads) - IMMEDIATE action
+    const videos = document.querySelectorAll('video');
+    for (const video of videos) {
+      const duration = video.duration;
+      const currentTime = video.currentTime;
+      
+      if (duration < 60 && duration > 0 && currentTime < 3) {
+        debug(`⚡ DOM SKIP: Short video detected (${duration}s) - IMMEDIATE SEEK`);
+        
+        // IMMEDIATE seek to end
+        video.currentTime = Math.max(duration - 0.1, 0);
+        
+        // Try JW Player skip
+        const jwPlayer = window.jwplayer();
+        if (jwPlayer && typeof jwPlayer.playlistItem === 'function') {
+          try {
+            const playlist = jwPlayer.getPlaylist();
+            const currentIndex = jwPlayer.getPlaylistIndex();
+            if (playlist && playlist.length > currentIndex + 1) {
+              jwPlayer.playlistItem(currentIndex + 1);
+              debug(`⚡ DOM SKIP: Jumped to next playlist item`);
+            }
+          } catch(e) {
+            debug(`❌ DOM skip failed: ${e.message}`);
+          }
+        }
+        
+        return true;
+      }
+    }
+    
+    return false;
+  };
+    
+    // Run ultra fast DOM skip every 200ms (faster than before)
+    setInterval(ultraFastDomSkip, 200);
+    
+
+  // ============================================================
   // ✅ COMPLETE
   // ============================================================
-  log('🟢 Smart AdBlock activated');
+  log('🟢 AdBlock active - Lightweight mode (CVT ads blocked, all .m3u8 visible)');
 })();
