@@ -1,5 +1,5 @@
 // ============================================================
-// 🛡️ ROPHIM ADBLOCK - REFACTORED VERSION
+// 🛡️ ROPHIM ADBLOCK - OPTIMIZED VERSION
 // ============================================================
 (() => {
   'use strict';
@@ -10,8 +10,6 @@
 
   const log = msg => console.log(`✅ [${isGoat ? 'Goat' : 'RoPhim'}] ${msg}`);
   const warn = msg => console.warn(`⚠️ [${isGoat ? 'Goat' : 'RoPhim'}] ${msg}`);
-  // Reduced debug logs for performance
-  const debug = () => {}; // Disabled debug logs
 
   // ============================================================
   // 🍪 COOKIE PROTECTION
@@ -42,7 +40,6 @@
   setInterval(protectCookies, 2000);
   log('🍪 Cookie protection active');
 
-
   // ============================================================
   // 🔥 JW PLAYER HOOK
   // ============================================================
@@ -62,7 +59,6 @@
         
         p.setup = function(cfg) {
           if (cfg) {
-            // Remove ad configs
             ['advertising', 'preload', 'vastPlugin', 'ima', 'googima', 'freewheel'].forEach(key => delete cfg[key]);
             cfg.autostart = true;
             cfg.mute = false;
@@ -94,8 +90,7 @@
               }
               
               if (dur > 0) {
-                const seekTo = Math.min(dur - 0.5, 15);
-                this.seek(seekTo);
+                this.seek(Math.min(dur - 0.5, 15));
                 return true;
               }
               
@@ -118,7 +113,6 @@
               
               if (isAd && !adSkipped) {
                 skipInProgress = true;
-                
                 const playlist = this.getPlaylist(), currentIndex = this.getPlaylistIndex();
                 
                 if (playlist && playlist.length > currentIndex + 1) {
@@ -137,7 +131,6 @@
               
               if (state !== 'playing') this.play();
               if (this.getMute()) this.setMute(false);
-              
             } catch(e) {
               skipInProgress = false;
             }
@@ -187,6 +180,10 @@
     '[id*="cvt"]','[class*="pmolink"]','[class*="finallygotthexds"]','[class*="sundaythekingplays"]'
   ];
 
+  const hideElement = (el) => {
+    el.style.cssText = 'display:none!important;opacity:0!important;pointer-events:none!important;visibility:hidden!important;position:absolute!important;left:-9999px!important;top:-9999px!important;z-index:-9999!important;';
+  };
+
   const injectCSS = () => {
     const css = document.createElement('style');
     css.textContent = `
@@ -219,7 +216,7 @@
       }
     `;
     (document.head || document.documentElement).appendChild(css);
-    log('🎨 Enhanced CSS injected');
+    log('🎨 Enhanced CSS injected (safe mode)');
   };
 
   injectCSS();
@@ -229,39 +226,38 @@
     
     const clean = () => {
       const now = Date.now();
-      if (now - lastCleanTime < 100) return; // Throttle cleaning
+      if (now - lastCleanTime < 100) return;
       lastCleanTime = now;
       
-      const foundAds = document.querySelectorAll(AD_SELECTORS.join(','));
-      
-      foundAds.forEach(el => {
-        if (!el.closest('video,#embed-player,.jwplayer,.watch-player')) {
-          el.remove();
-          count++;
-        }
-      });
-      
-      if (document.body) {
-        document.body.classList.remove('modal-open');
-        document.body.style.overflow = '';
-        document.body.style.paddingRight = '';
-      }
-      
-      // Optimized z-index check - only check visible elements
-      document.querySelectorAll('div[style*="position:"][style*="z-index"]').forEach(el => {
-        if (el.offsetParent === null) return;
+      try {
+        const foundAds = document.querySelectorAll(AD_SELECTORS.join(','));
         
-        const style = window.getComputedStyle(el);
-        const zIndex = parseInt(style.zIndex);
-        
-        if (zIndex > 9000 && !el.closest('video,#embed-player,.jwplayer,.watch-player')) {
-          const rect = el.getBoundingClientRect();
-          if (rect.width > window.innerWidth * 0.8 && rect.height > window.innerHeight * 0.8) {
-            el.remove();
-            count++;
+        foundAds.forEach(el => {
+          if (el.parentNode && !el.closest('video,#embed-player,.jwplayer,.watch-player')) {
+            try {
+              hideElement(el);
+              count++;
+            } catch(e) {}
           }
-        }
-      });
+        });
+      
+        document.querySelectorAll('div[style*="position:"][style*="z-index"]').forEach(el => {
+          if (el.offsetParent === null || !el.parentNode) return;
+          
+          try {
+            const style = window.getComputedStyle(el);
+            const zIndex = parseInt(style.zIndex);
+            
+            if (zIndex > 9000 && !el.closest('video,#embed-player,.jwplayer,.watch-player')) {
+              const rect = el.getBoundingClientRect();
+              if (rect.width > window.innerWidth * 0.8 && rect.height > window.innerHeight * 0.8) {
+                hideElement(el);
+                count++;
+              }
+            }
+          } catch(e) {}
+        });
+      } catch(e) {}
     };
 
     clean();
@@ -269,23 +265,34 @@
     
     const obs = new MutationObserver((mutations) => {
       let hasAdElements = false;
-      mutations.forEach((mutation) => {
-        mutation.addedNodes.forEach((node) => {
-          if (node.nodeType === 1 && node.matches) {
-            AD_SELECTORS.forEach(selector => {
-              if (node.matches(selector)) {
-                hasAdElements = true;
-                return false;
+      
+      try {
+        mutations.forEach((mutation) => {
+          if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+            mutation.addedNodes.forEach((node) => {
+              if (node.nodeType === 1 && node.matches) {
+                AD_SELECTORS.forEach(selector => {
+                  if (node.matches(selector)) {
+                    hasAdElements = true;
+                    return false;
+                  }
+                });
               }
             });
           }
         });
-      });
-      
-      if (hasAdElements) clean();
+        
+        if (hasAdElements) setTimeout(clean, 50);
+      } catch(e) {}
     });
     
-    obs.observe(document.documentElement, {childList: true, subtree: true});
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        obs.observe(document.documentElement, {childList: true, subtree: true});
+      });
+    } else {
+      obs.observe(document.documentElement, {childList: true, subtree: true});
+    }
     
     setTimeout(() => {
       if (count > 0) log(`🧹 Cleaned ${count} ads`);
@@ -295,41 +302,46 @@
   // ============================================================
   // 🚫 DOM SKIP
   // ============================================================
-  // Optimized DOM-based skip (Backup system)
   let lastSkipTime = 0;
   const ultraFastDomSkip = () => {
     const now = Date.now();
-    if (now - lastSkipTime < 500) return; // Throttle skip attempts
+    if (now - lastSkipTime < 500) return;
     lastSkipTime = now;
     
-    const skipButton = document.querySelector('.jw-skip, .jw-skip-button, [class*="skip"]');
-    if (skipButton && skipButton.offsetParent !== null) {
-      const text = skipButton.textContent?.trim();
-      if (text === 'Bỏ qua' || skipButton.classList.contains('jw-skippable') || text.includes('Skip')) {
-        skipButton.click();
-        return true;
+    try {
+      const skipButton = document.querySelector('.jw-skip, .jw-skip-button, [class*="skip"]');
+      if (skipButton && skipButton.offsetParent !== null && skipButton.parentNode) {
+        const text = skipButton.textContent?.trim();
+        if (text === 'Bỏ qua' || skipButton.classList.contains('jw-skippable') || text.includes('Skip')) {
+          skipButton.click();
+          return true;
+        }
       }
-    }
-    
-    const videos = document.querySelectorAll('video');
-    for (const video of videos) {
-      const duration = video.duration, currentTime = video.currentTime;
       
-      if (duration < 60 && duration > 0 && currentTime < 3) {
-        video.currentTime = Math.max(duration - 0.1, 0);
+      const videos = document.querySelectorAll('video');
+      for (const video of videos) {
+        if (!video.parentNode) continue;
         
-        const jwPlayer = window.jwplayer();
-        if (jwPlayer && typeof jwPlayer.playlistItem === 'function') {
+        const duration = video.duration, currentTime = video.currentTime;
+        
+        if (duration < 60 && duration > 0 && currentTime < 3) {
           try {
-            const playlist = jwPlayer.getPlaylist(), currentIndex = jwPlayer.getPlaylistIndex();
-            if (playlist && playlist.length > currentIndex + 1) {
-              jwPlayer.playlistItem(currentIndex + 1);
+            video.currentTime = Math.max(duration - 0.1, 0);
+            
+            const jwPlayer = window.jwplayer();
+            if (jwPlayer && typeof jwPlayer.playlistItem === 'function') {
+              try {
+                const playlist = jwPlayer.getPlaylist(), currentIndex = jwPlayer.getPlaylistIndex();
+                if (playlist && playlist.length > currentIndex + 1) {
+                  jwPlayer.playlistItem(currentIndex + 1);
+                }
+              } catch(e) {}
             }
+            return true;
           } catch(e) {}
         }
-        return true;
       }
-    }
+    } catch(e) {}
     return false;
   };
     
